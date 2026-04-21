@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+option {
+  color: black !important;
+  background-color: white !important;
+  padding: 8px 12px;
+}
+
+option:hover,
+option:focus {
+  background-color: #18e09b !important;
+  color: white !important;
+}
