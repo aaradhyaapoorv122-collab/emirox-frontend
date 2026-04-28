@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Search, MessageSquarePlus, Trash2, Settings, Home } from "lucide-react";
+import { Search, Home } from "lucide-react";
 
 const features = [
   { label: "Smart Chat", icon: "🧠", route: "/empicraft/smart-chat" },
@@ -11,13 +11,12 @@ const features = [
   { label: "AI Summary", icon: "🧠📄", route: "/empicraft/AI-Summary-Mode" },
   { label: "Doubt Solver", icon: "❓", route: "/empicraft/doubt-solver" },
   { label: "Study Companion", icon: "🤖", route: "/empicraft/study-companion" },
+  { label: "Skill Hub", icon: "🧪", route: "/empicraft/Skill-Hub" },
+  { label: "Project Maker", icon: "📚", route: "/empicraft/project-maker" },
+  { label: "Career Detector", icon: "📈", route: "/empicraft/career-detector" },
 ];
 
-const mockChats = [
-  { id: 1, title: "Math Revision Plan" },
-  { id: 2, title: "AI Summary Notes" },
-  { id: 3, title: "Quiz Strategy" },
-];
+const mockChats = [];
 
 export default function EmpiCraftSidebar() {
   const navigate = useNavigate();
@@ -36,7 +35,6 @@ export default function EmpiCraftSidebar() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // ===== DRAG RESIZE =====
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!sidebarRef.current) return;
@@ -72,29 +70,27 @@ export default function EmpiCraftSidebar() {
 
   return (
     <>
-      {/* Mobile Toggle */}
       {isMobile && (
         <button className="mobileBtn" onClick={() => setOpen(true)}>
           ☰
         </button>
       )}
 
-      {/* Overlay */}
-      {isMobile && open && (
-        <div className="overlay" onClick={() => setOpen(false)} />
-      )}
+      {isMobile && open && <div className="overlay" onClick={() => setOpen(false)} />}
 
       <div
         ref={sidebarRef}
         className="sidebar"
         style={{
-           width: isMobile ? 290 : width,
+          width: isMobile ? 290 : width,
           position: isMobile ? "fixed" : "relative",
           transform: isMobile
-       ? (open ? "translateX(0)" : "translateX(-100%)") : "none",
+            ? open
+              ? "translateX(0)"
+              : "translateX(-100%)"
+            : "none",
         }}
       >
-        {/* Resize Handle */}
         {!isMobile && (
           <div
             className="resizeHandle"
@@ -110,7 +106,7 @@ export default function EmpiCraftSidebar() {
 
         {/* Search */}
         <div className="searchBox">
-          <Search size={16} color="#8B7CF6" />
+          <Search size={16} color="#ff7a18" />
           <input
             className="searchInput"
             placeholder="Search features..."
@@ -119,21 +115,10 @@ export default function EmpiCraftSidebar() {
           />
         </div>
 
-        {/* Chat History Panel */}
-        <div className="chatPanel">
-          <div className="panelTitle">💬 Chat History</div>
-          {mockChats.map((chat) => (
-            <div key={chat.id} className="chatItem">
-              {chat.title}
-            </div>
-          ))}
-        </div>
-
         {/* Features */}
         <div className="list">
           {filtered.map((item) => {
             const isActive = location.pathname === item.route;
-
             return (
               <div
                 key={item.route}
@@ -146,13 +131,6 @@ export default function EmpiCraftSidebar() {
             );
           })}
         </div>
-
-        {/* Bottom */}
-        <div className="bottom">
-          <IconButton icon={<MessageSquarePlus size={18} />} label="New Chat" />
-          <IconButton icon={<Trash2 size={18} />} label="Trash" />
-          <IconButton icon={<Settings size={18} />} label="Settings" />
-        </div>
       </div>
 
       <style>{`
@@ -161,7 +139,8 @@ export default function EmpiCraftSidebar() {
           position: fixed;
           top: 0;
           left: 0;
-          background: #0f1420;
+          background: #0a0a0a;
+          border-right: 1px solid #ff7a18;
           padding: 14px;
           display: flex;
           flex-direction: column;
@@ -176,48 +155,23 @@ export default function EmpiCraftSidebar() {
           width: 6px;
           height: 100%;
           cursor: ew-resize;
-          background: transparent;
-        }
-
-        .chatPanel {
-          margin: 10px 0;
-          padding: 10px;
-          background: #151a26;
-          border-radius: 12px;
-        }
-
-        .panelTitle {
-          font-size: 12px;
-          color: #8b7cf6;
-          margin-bottom: 8px;
-        }
-
-        .chatItem {
-          padding: 6px;
-          font-size: 13px;
-          color: #e6e8f0;
-          cursor: pointer;
-          border-radius: 6px;
-        }
-
-        .chatItem:hover {
-          background: #1a2233;
         }
 
         .searchBox {
           display: flex;
           align-items: center;
-          background: #151a26;
+          background: #111;
           padding: 10px 12px;
           border-radius: 12px;
           margin-bottom: 14px;
+          border: 1px solid #222;
         }
 
         .searchInput {
           background: transparent;
           border: none;
           outline: none;
-          color: #e6e8f0;
+          color: #fff;
           margin-left: 8px;
           width: 100%;
         }
@@ -227,33 +181,18 @@ export default function EmpiCraftSidebar() {
           align-items: center;
           padding: 12px 14px;
           border-radius: 12px;
-          color: #e6e8f0;
+          color: #fff;
           cursor: pointer;
           margin-bottom: 6px;
         }
 
+        .item:hover {
+          background: #1a1a1a;
+        }
+
         .active {
-          background: rgba(139,124,246,0.15);
-          box-shadow: inset 3px 0 #8b7cf6;
-        }
-
-        .bottom {
-          display: flex;
-          justify-content: space-between;
-          padding-top: 12px;
-          border-top: 1px solid #1f2433;
-        }
-
-        .iconBtn {
-          width: 44px;
-          height: 44px;
-          border-radius: 12px;
-          background: #151a26;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #8b7cf6;
-          cursor: pointer;
+          background: rgba(255,122,24,0.15);
+          box-shadow: inset 3px 0 #ff7a18;
         }
 
         .mobileBtn {
@@ -263,8 +202,9 @@ export default function EmpiCraftSidebar() {
           z-index: 1100;
           padding: 10px;
           border-radius: 10px;
-          background: #111827;
-          color: white;
+          background: #0a0a0a;
+          color: #ff7a18;
+          border: 1px solid #ff7a18;
         }
 
         .overlay {
@@ -278,13 +218,5 @@ export default function EmpiCraftSidebar() {
         }
       `}</style>
     </>
-  );
-}
-
-function IconButton({ icon, label }) {
-  return (
-    <div className="iconBtn" title={label}>
-      {icon}
-    </div>
   );
 }

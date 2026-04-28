@@ -1,21 +1,19 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import api from "../../../utils/api.js";
-import { aiRequest } from "@/utils/aiRequest";
 import { supabase } from "@/lib/supabaseClient";
-
+import { BrainCore } from "@/utils/memoryEngine";
 
 const MAX_CHARS = 1800;
 
 const countries = {
   India: ["NCERT", "CBSE", "ICSE", "State Board"],
-
 };
 
 const modes = [
-  { id: "short", label: "Short Revision" },
-  { id: "medium", label: "Medium Understanding" },
-  { id: "bullet", label: "Bullet Notes" },
-  { id: "deep", label: "Deep Lesson Mode" },
+  { id: "short", label: "⚡ Short Revision" },
+  { id: "medium", label: "📘 Medium Understanding" },
+  { id: "bullet", label: "📝 Bullet Notes" },
+  { id: "deep", label: "🧠 Deep Lesson Mode" },
 ];
 
 export default function AiSummaryMode({ smartChatMemory = "" }) {
@@ -24,85 +22,219 @@ export default function AiSummaryMode({ smartChatMemory = "" }) {
   const [mode, setMode] = useState("short");
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const [typedOutput, setTypedOutput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [doubtInput, setDoubtInput] = useState("");
+  const [doubtReply, setDoubtReply] = useState("");
+  const [asking, setAsking] = useState(false);
 
-  // 🔗 Smart Chat → Auto Fill
+  /* ================= LOAD USER ================= */
   useEffect(() => {
-    if (smartChatMemory) {
-      setInput(smartChatMemory);
-    }
+    const getUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      setCurrentUser(data?.user || null);
+    };
+    getUser();
+  }, []);
+
+  /* ================= PREFILL ================= */
+  useEffect(() => {
+    if (smartChatMemory) setInput(smartChatMemory);
   }, [smartChatMemory]);
 
-  const remaining = MAX_CHARS - input.length;
- 
+  /* ================= TYPE EFFECT ================= */
+  useEffect(() => {
+    let i = 0;
+    setTypedOutput("");
 
-  const handleAskAI = async (message) => {
+    if (!output) return;
 
-    const result = await aiRequest(message, async (msg) => {
-      return await fetch("http://localhost:5000/ai/core", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ message: msg }),
-      }).then(r => r.json());
-    });
+    const timer = setInterval(() => {
+      i += 2;
+      setTypedOutput(output.slice(0, i));
+      if (i >= output.length) clearInterval(timer);
+    }, 8);
 
-    if (result.blocked) {
-      alert("🔒 Daily AI limit reached. Upgrade to EmpiLab ⚡");
+    return () => clearInterval(timer);
+  }, [output]);
+
+  const remaining = useMemo(() => MAX_CHARS - input.length, [input]);
+
+  /* ================= PROMPT ================= */
+  const buildPrompt = () => `
+You are Premium Study Notes AI.
+
+Convert topic into structured student notes.
+
+TOPIC:
+${input}
+
+BOARD: ${board}
+COUNTRY: ${country}
+MODE: ${mode}
+
+RULES:
+- Use headings
+- Use bullets
+- Add emojis
+- Add memory tricks
+- Exam-friendly format
+- No long boring paragraphs
+`;
+
+  /* ================= MEMORY EXTRACT ================= */
+  const extractKeyPoints = (text) => {
+    return text
+      .split("\n")
+      .filter(
+        (line) =>
+          line.includes("•") ||
+          line.includes("-") ||
+          line.includes("⚡") ||
+          line.includes("📌")
+      )
+      .slice(0, 5);
+  };
+
+  /* ================= SAFE BRAIN LOG ================= */
+  const logToBrain = async (finalSummary) => {
+    const user =
+      currentUser ||
+      JSON.parse(localStorage.getItem("user")) ||
+      { id: "guest" };
+
+    try {
+      await BrainCore.log(user.id, "ai_summary", {
+        topic: input,
+        mode,
+        board,
+        country,
+        summaryLength: finalSummary.length,
+        keyInsights: extractKeyPoints(finalSummary),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.log("BrainCore log failed:", err);
+    }
+  };
+
+  /* ================= GENERATE ================= */
+  const generateSummary = async () => {
+    if (!input.trim()) return;
+
+    setLoading(true);
+    setOutput("");
+
+    try {
+      const response = await api.sendAIMessage({
+        message: buildPrompt(),
+        feature: "summary_ai",
+        standard: "8",
+        context: `Board:${board},Country:${country},Mode:${mode}`,
+      });
+
+      const result = response?.reply || response || "No summary generated.";
+      setOutput(result);
+
+      // SAFE MEMORY LOG (after AI response)
+      setTimeout(() => {
+        logToBrain(result);
+      }, 500);
+    } catch (e) {
+      setOutput("⚠️ Failed to generate summary.");
+    }
+
+    setLoading(false);
+  };
+
+  /* ================= SAVE ================= */
+  const saveSummary = async () => {
+    if (!typedOutput.trim()) return;
+
+    if (!currentUser?.id) {
+      alert("Login required.");
       return;
     }
 
-    console.log(result.data);
+    setSaving(true);
+
+    try {
+      const { error } = await supabase.from("files").insert([
+        {
+          user_id: currentUser.id,
+          title: `AI Summary - ${new Date().toLocaleDateString()}`,
+          type: "summary_note",
+          content: typedOutput,
+        },
+      ]);
+
+      if (error) throw error;
+
+      alert("✅ Summary saved successfully!");
+    } catch (e) {
+      alert("⚠️ Failed to save summary.");
+    }
+
+    setSaving(false);
   };
 
-  
+  /* ================= DOUBT SOLVER ================= */
+  const askDoubt = async () => {
+    if (!doubtInput.trim()) return;
 
-  const fakeSummarize = async () => {
-  if (!input.trim()) return;
+    setAsking(true);
+    setDoubtReply("");
 
-  setLoading(true);
-  setOutput("");
+    try {
+      const response = await api.sendAIMessage({
+        message: `
+Student Notes:
+${typedOutput}
 
-  try {
-    const response = await api.sendAIMessage({
-      message: `
-Summarize this content based on selected mode:
+Doubt:
+${doubtInput}
 
-Content:
-${input}
+Explain in simple student-friendly language.
+        `,
+        feature: "doubt_ai",
+      });
 
-Instructions:
-- Mode: ${mode}
-- Country: ${country}
-- Board: ${board}
+      setDoubtReply(response?.reply || response || "No answer.");
+    } catch (e) {
+      setDoubtReply("⚠️ Failed to solve doubt.");
+    }
 
-Rules:
-- Keep exam oriented
-- Follow selected mode strictly
-- Make it structured and easy to revise
-      `,
-      feature: "summary_ai",
-      standard: "8th",
-      context: `Board: ${board}, Country: ${country}, Mode: ${mode}`,
-    });
+    setAsking(false);
+  };
 
-    setOutput(`(${country} – ${board})\n\n${response}`);
+  /* ================= UTILITIES ================= */
+  const copyNotes = async () => {
+    await navigator.clipboard.writeText(typedOutput);
+    alert("📋 Copied!");
+  };
 
-  } catch (err) {
-    console.error("Summary AI Error:", err);
+  const downloadTxt = () => {
+    const blob = new Blob([typedOutput], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
 
-    setOutput("⚠️ AI failed to generate summary. Try again.");
-  }
+    a.href = url;
+    a.download = "AI-Summary-Notes.txt";
+    a.click();
 
-  setLoading(false);
-};
+    URL.revokeObjectURL(url);
+  };
+
+  /* ================= UI ================= */
   return (
     <div style={styles.wrapper}>
       <div style={styles.card}>
-        <h2 style={styles.title}>AI Summary Mode</h2>
+        <h2 style={styles.title}>🧠 AI Summary PRO</h2>
+        <p style={styles.sub}>Smart Notes • Doubts • Memory System</p>
 
-        {/* Country & Board */}
+        {/* SELECTORS */}
         <div style={styles.row}>
           <select
             style={styles.select}
@@ -128,55 +260,85 @@ Rules:
           </select>
         </div>
 
-        {/* Input */}
+        {/* INPUT */}
         <textarea
           style={styles.textarea}
-          placeholder="Paste lesson, notes, or type: 'Light – Reflection and Refraction'"
           value={input}
-          onChange={(e) => {
-            if (e.target.value.length <= MAX_CHARS) {
-              setInput(e.target.value);
-            }
-          }}
+          placeholder="Paste lesson / chapter / topic..."
+          onChange={(e) =>
+            e.target.value.length <= MAX_CHARS && setInput(e.target.value)
+          }
         />
 
-        <div style={styles.counter}>
-          {remaining} characters left
-        </div>
+        <div style={styles.counter}>{remaining} chars left</div>
 
-        {/* Modes */}
+        {/* MODES */}
         <div style={styles.modes}>
           {modes.map((m) => (
             <button
               key={m.id}
+              onClick={() => setMode(m.id)}
               style={{
                 ...styles.modeBtn,
-                ...(mode === m.id ? styles.modeActive : {}),
+                ...(mode === m.id ? styles.activeMode : {}),
               }}
-              onClick={() => setMode(m.id)}
             >
               {m.label}
             </button>
           ))}
         </div>
 
-        {/* Action */}
+        {/* GENERATE */}
         <button
           style={styles.mainBtn}
-          disabled={!input || loading}
-          onClick={fakeSummarize}
+          onClick={generateSummary}
+          disabled={loading || !input.trim()}
         >
-          {loading ? "Analyzing…" : "Summarize"}
+          {loading ? "⏳ Creating..." : "✨ Generate Smart Summary"}
         </button>
 
-        {/* Output */}
-        {output && (
-          <div style={styles.output}>
-            <pre style={{ whiteSpace: "pre-wrap" }}>{output}</pre>
+        {/* OUTPUT */}
+        {typedOutput && (
+          <div style={styles.outputBox}>
+            <div style={styles.outputHeader}>📄 AI Summary</div>
+
+            <div style={styles.outputContent}>
+              <pre style={styles.pre}>{typedOutput}</pre>
+            </div>
 
             <div style={styles.actions}>
-              <button style={styles.subBtn}>Save as Notes</button>
-              <button style={styles.subBtn}>Ask Doubt</button>
+              <button style={styles.saveBtn} onClick={saveSummary}>
+                💾 Save
+              </button>
+              <button style={styles.askBtn} onClick={copyNotes}>
+                📋 Copy
+              </button>
+              <button style={styles.askBtn} onClick={downloadTxt}>
+                📥 Download
+              </button>
+            </div>
+
+            {/* DOUBT */}
+            <div style={{ padding: 14, borderTop: "1px solid #1e293b" }}>
+              <textarea
+                style={{ ...styles.textarea, minHeight: 90 }}
+                placeholder="Ask doubt..."
+                value={doubtInput}
+                onChange={(e) => setDoubtInput(e.target.value)}
+              />
+
+              <button
+                style={{ ...styles.mainBtn, marginTop: 10 }}
+                onClick={askDoubt}
+              >
+                {asking ? "Solving..." : "❓ Ask Doubt"}
+              </button>
+
+              {doubtReply && (
+                <div style={styles.doubtBox}>
+                  <pre style={styles.pre}>{doubtReply}</pre>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -185,110 +347,170 @@ Rules:
   );
 }
 
-/* 🎨 PREMIUM STYLES */
+/* ================= STYLES ================= */
 const styles = {
   wrapper: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #0f172a, #020617)",
+    padding: 20,
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
-    padding: 20,
+    background: "#0A0A0A",
   },
+
   card: {
     width: "100%",
-    maxWidth: 720,
-    background: "#0b1220",
-    borderRadius: 18,
+    maxWidth: 820,
+    background: "rgba(0,0,0,0.75)",
+    backdropFilter: "blur(18px)",
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    borderRadius: 24,
     padding: 24,
-    boxShadow: "0 25px 60px rgba(0,0,0,0.5)",
-    color: "#e5e7eb",
+    color: "#EAEAEA",
   },
+
   title: {
-    marginBottom: 16,
-    fontSize: 22,
-    fontWeight: 600,
     textAlign: "center",
-    color: "#67e8f9",
+    fontSize: 28,
+    color: "#D4AF37",
   },
+
+  sub: {
+    textAlign: "center",
+    color: "#A8A8A8",
+    marginBottom: 18,
+  },
+
   row: {
     display: "flex",
     gap: 12,
-    marginBottom: 12,
   },
+
   select: {
     flex: 1,
-    padding: 10,
-    borderRadius: 10,
-    background: "#020617",
-    color: "#e5e7eb",
-    border: "1px solid #1e293b",
+    padding: 12,
+    borderRadius: 12,
+    background: "rgba(0,0,0,0.9)",
+    color: "#EAEAEA",
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    outline: "none",
   },
+
   textarea: {
     width: "100%",
-    minHeight: 120,
+    minHeight: 160,
     padding: 14,
-    borderRadius: 12,
-    background: "#020617",
-    color: "#e5e7eb",
-    border: "1px solid #1e293b",
-    resize: "none",
+    borderRadius: 14,
+    background: "rgba(0,0,0,0.9)",
+    color: "#EAEAEA",
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    marginTop: 12,
+    outline: "none",
   },
+
   counter: {
-    fontSize: 12,
-    color: "#94a3b8",
     textAlign: "right",
-    marginTop: 4,
+    fontSize: 12,
+    color: "#D4AF37",
+    opacity: 0.8,
   },
+
   modes: {
     display: "flex",
+    gap: 10,
     flexWrap: "wrap",
-    gap: 8,
-    margin: "14px 0",
+    marginTop: 14,
   },
+
   modeBtn: {
-    padding: "8px 12px",
-    borderRadius: 20,
-    background: "#020617",
-    border: "1px solid #1e293b",
-    color: "#cbd5f5",
-    cursor: "pointer",
+    padding: "10px 14px",
+    borderRadius: 999,
+    border: "1px solid rgba(255, 215, 0, 0.2)",
+    background: "rgba(0,0,0,0.7)",
+    color: "#C8C8C8",
+    transition: "0.2s",
   },
-  modeActive: {
-    background: "#06b6d4",
-    color: "#020617",
-    border: "none",
+
+  activeMode: {
+    background: "linear-gradient(135deg, #D4AF37, #8B6B00)",
+    color: "#000",
+    fontWeight: "bold",
   },
+
   mainBtn: {
     width: "100%",
     padding: 14,
-    borderRadius: 14,
-    background: "#22d3ee",
-    color: "#020617",
-    fontWeight: 600,
-    border: "none",
-    cursor: "pointer",
-    marginTop: 10,
-  },
-  output: {
     marginTop: 18,
-    padding: 16,
     borderRadius: 14,
-    background: "#020617",
-    border: "1px solid #1e293b",
+    border: "none",
+    fontWeight: "bold",
+    background: "linear-gradient(135deg, #D4AF37, #8B6B00)",
+    color: "#000",
+    boxShadow: "0 0 12px rgba(255, 215, 0, 0.25)",
   },
+
+  outputBox: {
+    marginTop: 22,
+    borderRadius: 18,
+    overflow: "hidden",
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    background: "rgba(0,0,0,0.85)",
+  },
+
+  outputHeader: {
+    padding: 14,
+    fontWeight: "bold",
+    background: "rgba(255, 215, 0, 0.08)",
+    color: "#D4AF37",
+    borderBottom: "1px solid rgba(255, 215, 0, 0.15)",
+  },
+
+  outputContent: {
+    padding: 18,
+    maxHeight: 420,
+    overflowY: "auto",
+    color: "#EAEAEA",
+  },
+
+  pre: {
+    whiteSpace: "pre-wrap",
+    margin: 0,
+    lineHeight: 1.8,
+  },
+
   actions: {
     display: "flex",
     gap: 10,
-    marginTop: 10,
+    padding: 14,
+    borderTop: "1px solid rgba(255, 215, 0, 0.15)",
   },
-  subBtn: {
+
+  saveBtn: {
     flex: 1,
-    padding: 10,
-    borderRadius: 10,
-    background: "#020617",
-    border: "1px solid #22d3ee",
-    color: "#67e8f9",
-    cursor: "pointer",
+    padding: 12,
+    background: "linear-gradient(135deg, #D4AF37, #8B6B00)",
+    borderRadius: 12,
+    border: "none",
+    color: "#000",
+    fontWeight: "bold",
+  },
+
+  askBtn: {
+    flex: 1,
+    padding: 12,
+    background: "rgba(255, 215, 0, 0.12)",
+    borderRadius: 12,
+    border: "1px solid rgba(255, 215, 0, 0.2)",
+    color: "#D4AF37",
+    fontWeight: "bold",
+  },
+
+  doubtBox: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 14,
+    background: "rgba(0,0,0,0.8)",
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    color: "#EAEAEA",
   },
 };

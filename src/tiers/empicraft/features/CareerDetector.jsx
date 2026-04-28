@@ -1,20 +1,19 @@
 import React, { useState } from "react";
 import api from "../../../utils/api.js";
 
-/* ================= THEME (PREMIUM PSYCHOLOGY COLORS) ================= */
+/* ================= THEME ================= */
 const theme = {
-  bg: "radial-gradient(circle at top left, #0f0c29, #1a1a2e, #000000)",
-  card: "rgba(255,255,255,0.05)",
-  border: "rgba(255,255,255,0.08)",
-  text: "#e0e7ff",
-  sub: "#a5b4fc",
-  neon1: "#ff4ecd",
-  neon2: "#00f0ff",
-  accent: "#7c3aed",
+  bg: "radial-gradient(circle at top left, #0a0a0a, #000000)",
+  card: "rgba(255, 140, 0, 0.06)",
+  border: "rgba(255, 140, 0, 0.15)",
+  text: "#ffffff",
+  sub: "#ffb347",
+  neon1: "#ff6a00",
+  neon2: "#ff9a3c",
+  accent: "#ff6a00",
 };
 
-/* ================= DATA (UNCHANGED) ================= */
-// (keeping your original data exactly same)
+/* ================= DATA ================= */
 
 const academicSubjects = [
   "Physics","Chemistry","Biology","Mathematics","Computer Science",
@@ -39,74 +38,10 @@ const thinkingSliders = [
   { id: "leadershipSupport", label: "Leadership ↔ Support Role" },
 ];
 
-const countries = [
-  "India"
-];
-
+const countries = ["India"];
 const classesGrades = ["8th","9th","10th","11th","12th","Undergraduate"];
 
-/* ================= CAREER LOGIC (UNCHANGED) ================= */
-const generatePlans = async () => {
-  try {
-    const message = `
-You are Career Intelligence AI.
-
-Analyze this student profile:
-
-Subjects: ${favSubjects.join(", ")}
-Best Skills: ${skillsBest.join(", ")}
-Skills Learning: ${skillsLearn.join(", ")}
-Thinking Profile: ${JSON.stringify(sliders)}
-Country: ${country}
-
-TASK:
-1. Suggest top 3 career paths
-2. Explain why each fits
-3. List required skills
-4. Give future scope
-
-OUTPUT FORMAT STRICT:
-
-[
-  {
-    "name": "",
-    "domain": "",
-    "reason": "",
-    "skillsNeeded": []
-  }
-]
-`;
-
-    const res = await api.sendAI({
-      feature: "career_detector_ai",
-      message,
-      context: {
-        country,
-        classGrade,
-      },
-    });
-
-    // SAFE PARSING (VERY IMPORTANT)
-    let parsed;
-    try {
-      parsed = JSON.parse(res);
-    } catch (e) {
-      console.log("AI RAW:", res);
-      parsed = [];
-    }
-
-    setPlans(Array.isArray(parsed) ? parsed : []);
-    setStep(3);
-
-  } catch (err) {
-    console.log(err);
-  }
-};
-
-
-  
-
-/* ================= MAIN COMPONENT ================= */
+/* ================= COMPONENT ================= */
 
 export default function CareerDetectorPro() {
   const [step, setStep] = useState(1);
@@ -131,7 +66,15 @@ export default function CareerDetectorPro() {
 
   const [plans, setPlans] = useState(null);
 
-  /* ================= HANDLERS ================= */
+  /* ================= CLEAN AI RESPONSE ================= */
+  const cleanAIResponse = (text) => {
+    return text
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+  };
+
+  /* ================= TOGGLES ================= */
 
   const toggleSubject = (sub) => {
     if (favSubjects.includes(sub)) {
@@ -142,20 +85,28 @@ export default function CareerDetectorPro() {
     }
   };
 
-  const toggleSkill = (skill, setter, list) => {
-    if (list.includes(skill)) {
-      setter(list.filter((s) => s !== skill));
-    } else {
-      setter([...list, skill]);
-    }
+  const toggleSkillBest = (skill) => {
+    setSkillsBest((prev) =>
+      prev.includes(skill)
+        ? prev.filter((s) => s !== skill)
+        : [...prev, skill]
+    );
   };
 
-const generatePlans = async () => {
-  try {
-    const message = `
-You are Career Intelligence AI.
+  const toggleSkillLearn = (skill) => {
+    setSkillsLearn((prev) =>
+      prev.includes(skill)
+        ? prev.filter((s) => s !== skill)
+        : [...prev, skill]
+    );
+  };
 
-Analyze this student profile and suggest top 3 careers.
+  /* ================= AI GENERATION ================= */
+
+  const generatePlans = async () => {
+    try {
+      const message = `
+You are Career Intelligence AI.
 
 Subjects: ${favSubjects.join(", ")}
 Skills (best): ${skillsBest.join(", ")}
@@ -163,39 +114,41 @@ Skills (learning): ${skillsLearn.join(", ")}
 Thinking Profile: ${JSON.stringify(sliders)}
 Country: ${country}
 
-Return ONLY valid JSON:
+Return ONLY valid JSON. No markdown. No explanation.
+
 [
   {
-    "name": "Career Name",
-    "reason": "why this fits",
-    "skillsNeeded": ["skill1", "skill2"]
+    "name": "",
+    "reason": "",
+    "skillsNeeded": []
   }
 ]
 `;
 
-    const reply = await api.sendAI({
-      feature: AI_FEATURES.SKILL_HUB, // OR create CAREER_AI later
-      message,
-      context: { favSubjects, skillsBest, sliders, country },
-    });
+      const reply = await api.sendAIMessage({
+        feature: "career_detector_ai",
+        message,
+        context: { favSubjects, skillsBest, skillsLearn, sliders, country },
+      });
 
-    let parsed;
+      const cleaned = cleanAIResponse(reply);
 
-    try {
-      parsed = JSON.parse(reply);
-    } catch (e) {
-      console.log("AI RAW RESPONSE:", reply);
-      throw new Error("AI did not return valid JSON");
+      let parsed;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (e) {
+        console.log("RAW:", reply);
+        console.log("CLEANED:", cleaned);
+        throw new Error("Invalid JSON from AI");
+      }
+
+      setPlans(Array.isArray(parsed) ? parsed : []);
+      setStep(3);
+
+    } catch (err) {
+      console.error("Career AI error:", err);
     }
-
-    setPlans(parsed);
-    setStep(3);
-
-  } catch (err) {
-    console.error("Career AI error:", err);
-    alert("AI failed. Check backend logs.");
-  }
-};
+  };
 
   /* ================= UI ================= */
 
@@ -203,7 +156,6 @@ Return ONLY valid JSON:
     <div style={ui.wrapper}>
       <div style={ui.container}>
 
-        {/* HEADER */}
         <div style={ui.header}>
           🎯 Career Intelligence System
         </div>
@@ -220,10 +172,9 @@ Return ONLY valid JSON:
                     key={sub}
                     style={{
                       ...ui.card,
-                      border:
-                        favSubjects.includes(sub)
-                          ? `1px solid ${theme.neon1}`
-                          : `1px solid ${theme.border}`,
+                      border: favSubjects.includes(sub)
+                        ? `1px solid ${theme.neon1}`
+                        : `1px solid ${theme.border}`,
                     }}
                     onClick={() => toggleSubject(sub)}
                   >
@@ -254,13 +205,17 @@ Return ONLY valid JSON:
                     max="100"
                     value={sliders[s.id]}
                     onChange={(e) =>
-                      setSliders({ ...sliders, [s.id]: +e.target.value })
+                      setSliders({
+                        ...sliders,
+                        [s.id]: +e.target.value,
+                      })
                     }
                   />
                 </div>
               ))}
 
-              <h3>Skills</h3>
+              <h3>Skills (Click to toggle BEST skills)</h3>
+
               <div style={ui.chips}>
                 {skillOptions.map((skill) => (
                   <div
@@ -268,12 +223,13 @@ Return ONLY valid JSON:
                     style={{
                       ...ui.chip,
                       background: skillsBest.includes(skill)
-                        ? theme.neon2
+                        ? theme.neon1
                         : theme.card,
+                      color: skillsBest.includes(skill)
+                        ? "#0b0b0b"
+                        : "#ffb347",
                     }}
-                    onClick={() =>
-                      toggleSkill(skill, setSkillsBest, skillsBest)
-                    }
+                    onClick={() => toggleSkillBest(skill)}
                   >
                     {skill}
                   </div>
@@ -285,6 +241,7 @@ Return ONLY valid JSON:
               <button style={ui.btnSecondary} onClick={() => setStep(1)}>
                 Back
               </button>
+
               <button style={ui.btnPrimary} onClick={generatePlans}>
                 Generate Plans
               </button>
@@ -299,7 +256,7 @@ Return ONLY valid JSON:
 
             <div style={ui.grid}>
               {plans.map((p, i) => (
-                <div key={p.name} style={ui.planCard}>
+                <div key={i} style={ui.planCard}>
                   <h3>
                     Plan {String.fromCharCode(65 + i)} — {p.name}
                   </h3>
@@ -307,30 +264,29 @@ Return ONLY valid JSON:
                   <p>{p.reason}</p>
 
                   <div style={ui.skills}>
-                    {p.skillsNeeded.map((s) => (
-                      <span key={s}>{s}</span>
+                    {p.skillsNeeded.map((s, idx) => (
+                      <span key={idx} style={ui.skillTag}>
+                        {s}
+                      </span>
                     ))}
                   </div>
 
                   <div style={ui.actions}>
-                    <button style={ui.btnPrimarySmall}>
-                      🚀 Roadmap
-                    </button>
-                    <button style={ui.btnSecondarySmall}>
-                      📘 Skills
-                    </button>
+                    <button style={ui.btnPrimarySmall}>🚀 Roadmap</button>
+                    <button style={ui.btnSecondarySmall}>📘 Skills</button>
                   </div>
                 </div>
               ))}
             </div>
           </div>
         )}
+
       </div>
     </div>
   );
 }
 
-/* ================= UI STYLES ================= */
+/* ================= UI ================= */
 
 const ui = {
   wrapper: {
@@ -340,20 +296,19 @@ const ui = {
     justifyContent: "center",
     alignItems: "center",
     padding: 30,
-    fontFamily: "Inter",
+    fontFamily: "Inter, sans-serif",
   },
 
   container: {
     width: "1200px",
     padding: 30,
-    borderRadius: 30,
+    borderRadius: 28,
     background: theme.card,
     border: `1px solid ${theme.border}`,
-    boxShadow: "0 40px 120px rgba(0,0,0,0.9)",
   },
 
   header: {
-    fontSize: 30,
+    fontSize: 32,
     fontWeight: 800,
     marginBottom: 30,
     background: `linear-gradient(90deg,${theme.neon1},${theme.neon2})`,
@@ -372,18 +327,18 @@ const ui = {
   card: {
     padding: 16,
     borderRadius: 14,
-    background: theme.card,
+    background: "#1a1a1a",
     cursor: "pointer",
+    color: "#ffb347",
   },
 
-  sliderBox: {
-    marginBottom: 20,
-  },
+  sliderBox: { marginBottom: 20 },
 
   chips: {
     display: "flex",
     flexWrap: "wrap",
     gap: 10,
+    marginTop: 10,
   },
 
   chip: {
@@ -395,7 +350,7 @@ const ui = {
   planCard: {
     padding: 20,
     borderRadius: 20,
-    background: theme.card,
+    background: "#1a1a1a",
     border: `1px solid ${theme.border}`,
   },
 
@@ -403,6 +358,15 @@ const ui = {
     display: "flex",
     gap: 10,
     marginTop: 10,
+    flexWrap: "wrap",
+  },
+
+  skillTag: {
+    fontSize: 12,
+    padding: "4px 10px",
+    borderRadius: 12,
+    background: theme.neon2,
+    color: "#0b0b0b",
   },
 
   actions: {
@@ -411,19 +375,27 @@ const ui = {
     marginTop: 15,
   },
 
+  row: {
+    display: "flex",
+    justifyContent: "space-between",
+  },
+
   btnPrimary: {
     padding: "12px 24px",
-    borderRadius: 20,
+    borderRadius: 18,
     border: "none",
     background: theme.neon1,
+    color: "#0b0b0b",
+    fontWeight: 700,
     cursor: "pointer",
   },
 
   btnSecondary: {
     padding: "12px 24px",
-    borderRadius: 20,
-    border: "1px solid white",
+    borderRadius: 18,
+    border: `1px solid ${theme.neon2}`,
     background: "transparent",
+    color: theme.neon2,
     cursor: "pointer",
   },
 
@@ -432,17 +404,16 @@ const ui = {
     borderRadius: 12,
     background: theme.neon1,
     border: "none",
+    color: "#0b0b0b",
+    cursor: "pointer",
   },
 
   btnSecondarySmall: {
     padding: "8px 16px",
     borderRadius: 12,
-    background: theme.neon2,
-    border: "none",
-  },
-
-  row: {
-    display: "flex",
-    justifyContent: "space-between",
+    background: "transparent",
+    border: `1px solid ${theme.neon2}`,
+    color: theme.neon2,
+    cursor: "pointer",
   },
 };

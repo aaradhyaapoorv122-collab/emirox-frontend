@@ -1,301 +1,674 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+// 1️⃣ IMPORT SUPABASE ON TOP
 import { supabase } from "../lib/supabaseClient";
-import { AuthContext } from "../context/AuthContext";
-import { startRazorpayPayment } from "@/utils/payment";
+// use your correct path if different
 
-export default function TierSelector() {
+export default function EmpiCraftTierSelector() {
   const navigate = useNavigate();
-  const { setUser } = useContext(AuthContext);
 
-  const [user, setLocalUser] = useState(null);
+  /* ===============================
+     STORAGE KEYS
+  =============================== */
+  const TRIAL_KEY = "empicraft_trial_start";
+  const PLAN_KEY = "empicraft_plan";
 
+  const [popup, setPopup] = useState(false);
+  const [premiumPopup, setPremiumPopup] = useState(false);
+
+  const [timeLeft, setTimeLeft] = useState({
+    days: 90,
+    hrs: 0,
+    mins: 0,
+    secs: 0,
+  });
+
+  /* ===============================
+     TIMER SYSTEM (REAL 3 MONTH TRIAL)
+  =============================== */
   useEffect(() => {
-    async function getUser() {
-      const { data } = await supabase.auth.getUser();
-      setLocalUser(data?.user);
-    }
-    getUser();
+    const updateTimer = () => {
+      const savedTrial = localStorage.getItem(TRIAL_KEY);
+
+      if (!savedTrial) {
+        setTimeLeft({
+          days: 90,
+          hrs: 0,
+          mins: 0,
+          secs: 0,
+        });
+        return;
+      }
+
+      const startDate = new Date(savedTrial);
+      const endDate = new Date(startDate);
+
+      // add 90 days = approx 3 months
+      endDate.setDate(endDate.getDate() + 90);
+
+      const now = new Date();
+      const diff = endDate - now;
+
+      if (diff <= 0) {
+        localStorage.removeItem(TRIAL_KEY);
+        localStorage.setItem(PLAN_KEY, "free");
+
+        setTimeLeft({
+          days: 0,
+          hrs: 0,
+          mins: 0,
+          secs: 0,
+        });
+        return;
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hrs = Math.floor(
+        (diff / (1000 * 60 * 60)) % 24
+      );
+      const mins = Math.floor(
+        (diff / (1000 * 60)) % 60
+      );
+      const secs = Math.floor(
+        (diff / 1000) % 60
+      );
+
+      setTimeLeft({
+        days,
+        hrs,
+        mins,
+        secs,
+      });
+    };
+
+    updateTimer();
+
+    const interval = setInterval(updateTimer, 1000);
+
+    return () => clearInterval(interval);
   }, []);
 
-  const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-      setUser(null);
-      navigate("/");
-    } catch (error) {
-      console.error("Logout failed:", error.message);
-    }
+  /* ===============================
+     BUTTON ACTIONS
+  =============================== */
+
+  // FREE PLAN
+  const startFree = () => {
+    localStorage.setItem(PLAN_KEY, "free");
+    navigate("/empicraft/dashboard");
   };
+
+  // START TRIAL
+  const startTrial = () => {
+    const alreadyStarted =
+      localStorage.getItem(TRIAL_KEY);
+
+    if (!alreadyStarted) {
+      localStorage.setItem(
+        TRIAL_KEY,
+        new Date().toISOString()
+      );
+    }
+
+    localStorage.setItem(PLAN_KEY, "trial");
+
+    navigate("/empicraft/dashboard");
+  };
+
+  // PREMIUM PLAN
+  const startPremium = () => {
+    // Razorpay later
+    setPremiumPopup(true);
+
+    setTimeout(() => {
+      localStorage.setItem(PLAN_KEY, "premium");
+      navigate("/empicraft/dashboard");
+    }, 1200);
+  };
+
+  const lockedClick = () => {
+    setPopup(true);
+    setTimeout(() => setPopup(false), 2200);
+  };
+
+  // 2️⃣ ADD THIS FUNCTION INSIDE COMPONENT
+const handleLogout = async () => {
+  try {
+    await supabase.auth.signOut();
+
+    localStorage.removeItem("empicraft_trial_start");
+    localStorage.removeItem("empicraft_plan");
+    localStorage.removeItem("empirox_user");
+    localStorage.removeItem("empirox_profile");
+
+    navigate("/login", { replace: true });
+  } catch (error) {
+    navigate("/login", { replace: true });
+  }
+};
+
+  const Feature = ({ text }) => (
+    <div style={styles.featureRow}>
+      <span style={styles.tick}>✔</span>
+      <span>{text}</span>
+    </div>
+  );
+
 
   return (
     <div style={styles.page}>
-      {/* HEADER */}
-      <div style={styles.header}>
-        <h1 style={styles.title}>Choose Your Power</h1>
-        <p style={styles.subtitle}>
-          Start free with EmpiCraft or unlock full AI power with EmpiLab ⚡
-        </p>
-      </div>
+      {/* Locked Popup */}
+      {popup && (
+        <div style={styles.popup}>
+          🔒 Upgrade to Premium to unlock
+        </div>
+      )}
 
-      <div style={styles.grid}>
+      {/* Premium Popup */}
+      {premiumPopup && (
+        <div style={styles.popup}>
+          💳 Payment gateway coming soon...
+        </div>
+      )}
 
-        {/* 🆓 EMPICRAFT */}
-        <div style={{ ...styles.card, ...styles.craft }}>
-          <h2 style={styles.cardTitle}>EmpiCraft</h2>
-
-          <p style={styles.tagline}>
-            Free Learning Engine • 15 AI Uses / Day
-          </p>
-
-          <div style={styles.section}>
-            <p style={styles.sectionTitle}>Core Tools</p>
-            <ul style={styles.list}>
-              <li>Smart Chat</li>
-              <li>Study Planner</li>
-              <li>Quiz Arena</li>
-              <li>Concept Builder</li>
-              <li>AI Summary</li>
-              <li>Test Review</li>
-            </ul>
+      <div style={styles.wrapper}>
+        {/* HEADER */}
+        <div style={styles.header}>
+          <div style={styles.logo}>👑</div>
+          <div style={styles.brand}>EmpiCraft</div>
+          <div style={styles.tag}>
+            AI Learning. Unlimited Potential.
+             <button
+    style={styles.logoutBtn}
+    onClick={handleLogout}
+  >
+    Logout ↗
+    </button>
           </div>
-
-          <div style={styles.section}>
-            <p style={styles.sectionTitle}>AI Features</p>
-            <ul style={styles.list}>
-              <li>🔥 AI Doubt Resolver</li>
-              <li>🔥 AI Study Companion</li>
-            </ul>
-          </div>
-
-          <button
-            style={styles.freeBtn}
-            onClick={() => navigate("/Empicraft/Dashboard")}
-          >
-            Start Free →
-          </button>
         </div>
 
-        {/* ⚡ EMPILAB */}
-        <div style={{ ...styles.card, ...styles.lab }}>
-
-          <div style={styles.premiumBadge}>⚡ PREMIUM</div>
-
-          <h2 style={styles.labTitle}>EmpiLab</h2>
-
-          <p style={styles.labTagline}>
-            Advanced AI Intelligence System
-          </p>
-
-          <div style={styles.priceBox}>
-            ₹149 / month <br />
-            <span style={{ opacity: 0.7 }}>₹1199 / year (Best Value)</span>
-          </div>
-
+        {/* MAIN CARD */}
+        <div style={styles.mainCard}>
+          {/* FREE */}
           <div style={styles.section}>
-            <p style={styles.sectionTitle}>Full AI Suite</p>
-            <ul style={styles.list}>
-              <li>♾ Unlimited AI Access</li>
-              <li>🎙 Smart Mentor</li>
-              <li>🧪 Skill Hub</li>
-              <li>🏟 Test Arena</li>
-              <li>🧾 Smart Notes AI</li>
-              <li>📈 Career AI</li>
-              <li>📚 Project Builder</li>
-              <li>📊 Performance Coach</li>
-              <li>⚡ Challenge Generator</li>
-            </ul>
+            <div style={styles.row}>
+              <div style={styles.leftBox}>
+                <div style={styles.iconBox}>📦</div>
+
+                <div>
+                  <div style={styles.title}>
+                    FREE PLAN
+                  </div>
+
+                  <div style={styles.badgeDark}>
+                    4 Features
+                  </div>
+
+                  <div style={styles.desc}>
+                    Start your learning
+                    <br />
+                    journey with basics.
+                  </div>
+
+                  <button
+                    style={styles.freeBtn}
+                    onClick={startFree}
+                  >
+                    Start Free →
+                  </button>
+                </div>
+              </div>
+
+              <div style={styles.rightList}>
+                <Feature text="Smart Chat" />
+                <Feature text="Doubt Resolver" />
+                <Feature text="Study Companion" />
+                <Feature text="Blog Builder" />
+              </div>
+            </div>
+
+            <div style={styles.premiumRibbon}>
+              💎 PREMIUM
+            </div>
           </div>
 
-          <div style={styles.btnColumn}>
+          <div style={styles.line}></div>
 
-            <button
-              style={styles.monthBtn}
-              onClick={() => startRazorpayPayment(user, "monthly")}
-            >
-              ⚡ Pay ₹149 / month
-            </button>
+          {/* TRIAL */}
+          <div style={styles.sectionGlow}>
+            <div style={styles.row}>
+              <div style={styles.leftBox}>
+                <div style={styles.goldIcon}>⚡</div>
 
-            <button
-              style={styles.yearBtn}
-              onClick={() => startRazorpayPayment(user, "yearly")}
-            >
-              💎 Pay ₹1199 / year
-            </button>
+                <div>
+                  <div style={styles.goldTitle}>
+                    3-MONTH TRIAL
+                  </div>
 
+                  <div style={styles.badgeGold}>
+                    8 Core Features
+                  </div>
+
+                  <div style={styles.goldDesc}>
+                    Unlock powerful AI tools
+                    <br />
+                    for 3 months.
+                  </div>
+                </div>
+              </div>
+
+              <div style={styles.rightList}>
+                <Feature text="Smart Chat" />
+                <Feature text="Doubt Solver" />
+                <Feature text="Study Companion" />
+                <Feature text="Blog Builder" />
+                <Feature text="Test Review" />
+                <Feature text="Quiz Arena" />
+                <Feature text="Study Planner" />
+                <Feature text="AI Summary" />
+              </div>
+
+              <div style={styles.timerBox}>
+                <div style={styles.timerLabel}>
+                  TRIAL ENDS IN
+                </div>
+
+                <div style={styles.timerNumber}>
+                  {timeLeft.days}d :
+                  {timeLeft.hrs}h :
+                  {timeLeft.mins}m :
+                  {timeLeft.secs}s
+                </div>
+
+                <div style={styles.timerText}>
+                  Real live timer based on
+                  <br />
+                  your trial activation.
+                </div>
+
+                <button
+                  style={styles.freeBtn}
+                  onClick={startTrial}
+                >
+                  Start Trial →
+                </button>
+
+                <div style={styles.smallText}>
+                  No payment needed now
+                </div>
+              </div>
+            </div>
           </div>
 
+          <div style={styles.line}></div>
+
+          {/* PREMIUM */}
+          <div style={styles.section}>
+            <div style={styles.row}>
+              <div style={styles.leftBox}>
+                <div style={styles.goldIcon}>👑</div>
+
+                <div>
+                  <div style={styles.goldTitle}>
+                    PREMIUM PLAN
+                  </div>
+
+                  <div style={styles.badgeGold}>
+                    All 11 Features
+                  </div>
+
+                  <div style={styles.desc}>
+                    Everything unlocked.
+                  </div>
+                </div>
+              </div>
+
+              <div style={styles.rightList}>
+                <Feature text="Skill Hub" />
+                <Feature text="Career Detector" />
+                <Feature text="Project Builder" />
+              </div>
+
+              <div style={styles.priceBox}>
+                <div style={styles.price}>
+                  ₹199
+                  <span style={styles.month}>
+                    /month
+                  </span>
+                </div>
+
+                <button
+                  style={styles.goldButton}
+                  onClick={startPremium}
+                >
+                  Upgrade Premium 👑
+                </button>
+
+                <div style={styles.smallText}>
+                  Razorpay next step later
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* LOGOUT */}
-      <div style={{ textAlign: "center", marginTop: 30 }}>
-        <button style={styles.logoutBtn} onClick={handleLogout}>
-          Logout
-        </button>
+        {/* LOCKED */}
+        <div style={styles.lockTitle}>
+          🔒 PREMIUM FEATURES 🔒
+        </div>
+
+        <div style={styles.cardsWrap}>
+          {[
+            ["🧠", "Skill Hub"],
+            ["🎯", "Career Detector"],
+            ["🚀", "Project Builder"],
+          ].map((item, i) => (
+            <div
+              key={i}
+              style={styles.lockCard}
+              onClick={lockedClick}
+            >
+              <div style={styles.bigIcon}>
+                {item[0]}
+              </div>
+              <div style={styles.cardTitle}>
+                {item[1]}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
 }
 
-/* =========================
-   STYLES (FINAL UI SYSTEM)
-========================= */
+/* ===============================
+   STYLES (same UI kept)
+=============================== */
+
+const gold = "#d4af37";
 
 const styles = {
   page: {
     minHeight: "100vh",
-    padding: "40px",
-    fontFamily: "Segoe UI, sans-serif",
-    background: "linear-gradient(135deg, #eef2ff, #ffffff)",
+    background:
+      "radial-gradient(circle at top,#141414,#050505 60%)",
+    padding: "25px",
+    color: "white",
+    fontFamily: "Inter, sans-serif",
+  },
+
+  wrapper: {
+    maxWidth: "1180px",
+    margin: "0 auto",
   },
 
   header: {
     textAlign: "center",
-    marginBottom: "50px",
+    marginBottom: "25px",
   },
 
-  title: {
-    fontSize: "36px",
+  logo: { fontSize: "42px" },
+
+  brand: {
+    fontSize: "56px",
     fontWeight: "800",
+    color: gold,
   },
 
-  subtitle: {
-    opacity: 0.7,
-    marginTop: "10px",
+  tag: {
+    color: "#aaa",
+    marginTop: "5px",
+    fontSize: "20px",
   },
 
-  grid: {
+  mainCard: {
+    border: `1px solid ${gold}55`,
+    borderRadius: "28px",
+    background:
+      "linear-gradient(145deg,#080808,#0f0f0f)",
+    overflow: "hidden",
+  },
+
+  section: { padding: "30px" },
+  sectionGlow: {
+    padding: "30px",
+    background: "rgba(212,175,55,0.03)",
+  },
+
+  row: {
     display: "flex",
-    gap: "40px",
-    justifyContent: "center",
+    gap: "28px",
     flexWrap: "wrap",
   },
 
-  card: {
-    width: "340px",
-    padding: "30px",
+  leftBox: {
+    width: "300px",
+    display: "flex",
+    gap: "18px",
+  },
+
+  iconBox: {
+    width: "72px",
+    height: "72px",
+    borderRadius: "18px",
+    background: "#151515",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    fontSize: "34px",
+  },
+
+  goldIcon: {
+    width: "72px",
+    height: "72px",
+    borderRadius: "18px",
+    background:
+      "linear-gradient(145deg,#f6d76f,#7b5a00)",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    fontSize: "34px",
+    color: "#000",
+  },
+
+  title: {
+    fontSize: "34px",
+    fontWeight: "800",
+  },
+
+  goldTitle: {
+    fontSize: "34px",
+    fontWeight: "800",
+    color: gold,
+  },
+
+  badgeDark: {
+    marginTop: "8px",
+    padding: "6px 14px",
     borderRadius: "20px",
-    transition: "0.3s",
-    position: "relative",
+    background: "#1b1b1b",
+    display: "inline-block",
   },
 
-  craft: {
-    background: "#ffffff",
-    boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+  badgeGold: {
+    marginTop: "8px",
+    padding: "6px 14px",
+    borderRadius: "20px",
+    background: `${gold}22`,
+    display: "inline-block",
+    color: gold,
   },
 
-  lab: {
-    background: "linear-gradient(145deg, #0a0f1f, #141a33)",
-    color: "#e6f3ff",
-    boxShadow: "0 0 40px rgba(138, 43, 226, 0.4)",
-    transform: "scale(1.05)",
-    border: "1px solid rgba(138, 43, 226, 0.2)",
+  desc: {
+    marginTop: "14px",
+    color: "#aaa",
+    lineHeight: "1.6",
   },
 
-  cardTitle: {
-    fontSize: "24px",
-    fontWeight: "bold",
-  },
-
-  labTitle: {
-    fontSize: "26px",
-    fontWeight: "bold",
-  },
-
-  tagline: {
-    opacity: 0.7,
-    marginBottom: "15px",
-  },
-
-  labTagline: {
-    opacity: 0.8,
-    marginBottom: "15px",
-  },
-
-  section: {
-    marginBottom: "20px",
-  },
-
-  sectionTitle: {
-    fontWeight: "600",
-    marginBottom: "8px",
-    opacity: 0.8,
-  },
-
-  list: {
-    textAlign: "left",
-    lineHeight: "1.8",
-    paddingLeft: "15px",
-  },
-
-  priceBox: {
-    marginBottom: "15px",
-    fontWeight: "bold",
-    fontSize: "18px",
-  },
-
-  premiumBadge: {
-    position: "absolute",
-    top: "-10px",
-    right: "20px",
-    background: "gold",
-    color: "black",
-    padding: "5px 10px",
-    borderRadius: "10px",
-    fontSize: "12px",
-    fontWeight: "bold",
+  goldDesc: {
+    marginTop: "14px",
+    color: "#f7e2a0",
+    lineHeight: "1.6",
   },
 
   freeBtn: {
-    marginTop: "10px",
-    background: "#0077ff",
+    marginTop: "18px",
+    padding: "12px 18px",
+    borderRadius: "12px",
+    background: "#171717",
     color: "white",
-    padding: "12px",
     border: "none",
-    borderRadius: "10px",
     cursor: "pointer",
+  },
+
+  goldButton: {
+    marginTop: "18px",
     width: "100%",
-    fontWeight: "bold",
+    padding: "14px",
+    borderRadius: "14px",
+    background:
+      "linear-gradient(145deg,#f6d76f,#c89717)",
+    border: "none",
+    fontWeight: "800",
+    cursor: "pointer",
   },
 
-  btnColumn: {
+  rightList: { flex: 1 },
+
+  featureRow: {
     display: "flex",
-    flexDirection: "column",
-    gap: "12px",
+    gap: "10px",
+    marginBottom: "10px",
+  },
+
+  tick: { color: gold },
+
+  timerBox: {
+    width: "280px",
+    border: `1px solid ${gold}55`,
+    borderRadius: "20px",
+    padding: "20px",
+    background: "#0b0b0b",
+  },
+
+  timerLabel: {
+    color: gold,
+    textAlign: "center",
+    fontWeight: "700",
+  },
+
+  timerNumber: {
+    marginTop: "15px",
+    textAlign: "center",
+    fontSize: "24px",
+    fontWeight: "800",
+  },
+
+  timerText: {
+    textAlign: "center",
+    marginTop: "14px",
+    color: "#aaa",
+  },
+
+  priceBox: {
+    width: "280px",
+    border: `1px solid ${gold}55`,
+    borderRadius: "20px",
+    padding: "20px",
+    background: "#0b0b0b",
+  },
+
+  price: {
+    fontSize: "38px",
+    textAlign: "center",
+    color: gold,
+    fontWeight: "800",
+  },
+
+  month: {
+    fontSize: "15px",
+    color: "#aaa",
+  },
+
+  line: {
+    height: "1px",
+    background:
+      "linear-gradient(90deg,transparent,#d4af37,transparent)",
+  },
+
+  premiumRibbon: {
+    position: "absolute",
+    top: "0",
+    right: "0",
+    padding: "10px 18px",
+    background: gold,
+    color: "#000",
+    fontWeight: "800",
+  },
+  // 4️⃣ ADD THIS STYLE INSIDE styles OBJECT
+
+logoutBtn: {
+  marginTop: "18px",
+  padding: "12px 18px",
+  borderRadius: "12px",
+  background: "#111",
+  color: "#d4af37",
+  border: "1px solid #d4af37",
+  cursor: "pointer",
+  fontWeight: "800",
+  fontSize: "15px",
+},
+
+  lockTitle: {
+    textAlign: "center",
+    marginTop: "30px",
+    fontSize: "24px",
+    color: gold,
+    fontWeight: "800",
+  },
+
+  cardsWrap: {
+    display: "grid",
+    gridTemplateColumns:
+      "repeat(auto-fit,minmax(220px,1fr))",
+    gap: "18px",
+    marginTop: "18px",
+  },
+
+  lockCard: {
+    background: "#0c0c0c",
+    border: `1px solid ${gold}33`,
+    borderRadius: "20px",
+    padding: "25px",
+    textAlign: "center",
+    cursor: "pointer",
+  },
+
+  bigIcon: { fontSize: "42px" },
+
+  cardTitle: {
+    marginTop: "12px",
+    fontSize: "22px",
+    fontWeight: "800",
+  },
+
+  smallText: {
+    textAlign: "center",
     marginTop: "10px",
+    color: "#888",
+    fontSize: "13px",
   },
 
-  monthBtn: {
-    padding: "14px",
-    borderRadius: "12px",
-    border: "none",
-    cursor: "pointer",
-    fontWeight: "bold",
-    color: "#fff",
-    background: "linear-gradient(90deg, #8e2de2, #4a00e0)",
-    boxShadow: "0 10px 25px rgba(142, 45, 226, 0.4)",
-  },
-
-  yearBtn: {
-    padding: "14px",
-    borderRadius: "12px",
-    border: "none",
-    cursor: "pointer",
-    fontWeight: "bold",
-    color: "#fff",
-    background: "linear-gradient(90deg, #ff416c, #ff4b2b)",
-    boxShadow: "0 10px 25px rgba(255, 75, 43, 0.3)",
-  },
-
-  logoutBtn: {
-    background: "#ff4d4f",
-    color: "white",
-    padding: "12px 25px",
-    fontWeight: "bold",
-    border: "none",
-    borderRadius: "12px",
-    cursor: "pointer",
-    fontSize: 16,
+  popup: {
+    position: "fixed",
+    top: "20px",
+    right: "20px",
+    background: "#000",
+    border: `1px solid ${gold}`,
+    color: gold,
+    padding: "14px 18px",
+    borderRadius: "14px",
+    zIndex: 999,
   },
 };

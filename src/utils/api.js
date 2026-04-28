@@ -7,6 +7,7 @@ export const AI_FEATURES = {
   SMART_MENTOR: "mentor_ai",
   SOLVER: "solver_ai",
   SUMMARY: "summary_ai",
+  STUDYCOMPANION:"StudyCompanion_ai",
   NOTES: "notes_ai",
   QUIZ: "quiz_ai",
   TEST: "test_arena",

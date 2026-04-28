@@ -1,265 +1,613 @@
 import React, { useState, useEffect } from "react";
-import api from "../../../utils/api.js";
-import { aiRequest } from "@/utils/aiRequest";
+import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
-
+import api from "../../../utils/api.js";
+import { BrainCore } from "@/utils/memoryEngine";
 
 export default function StudyCompanion() {
-  const [dailyTip, setDailyTip] = useState("");
-  const [progress, setProgress] = useState({
-    Maths: 60,
-    Science: 35,
-    English: 80,
+  const [loadingPage, setLoadingPage] = useState(true);
+  const [loadingAI, setLoadingAI] = useState(false);
+
+  const [progress, setProgress] = useState(0);
+  const [aiReply, setAiReply] = useState("");
+
+  const [mood, setMood] = useState("Normal");
+  const [energy, setEnergy] = useState("Medium");
+
+  const [user, setUser] = useState({
+    id: "",
+    name: "User",
+    email: "",
+    className: "",
+    studyTime: "2 Hours",
+    weak: "General Revision",
+    overallProgress: 0,
+    subjects: [],
   });
-  const [focusSubject, setFocusSubject] = useState("");
-  const [sessionStarted, setSessionStarted] = useState(false);
-  const [rewards, setRewards] = useState([]);
-  const [activityLog, setActivityLog] = useState([]);
-   
-  
-  const handleAskAI = async (message) => {
 
-    const result = await aiRequest(message, async (msg) => {
-      return await fetch("http://localhost:5000/ai/core", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ message: msg }),
-      }).then(r => r.json());
-    });
+  const [todayTasks, setTodayTasks] = useState([]);
 
-    if (result.blocked) {
-      alert("🔒 Daily AI limit reached. Upgrade to EmpiLab ⚡");
-      return;
-    }
-
-    console.log(result.data);
-  };
-
-  
-
-  // AI-generated daily tip & focus subject
   useEffect(() => {
-    const encouragements = [
-      "Consistency beats intensity! 💪",
-      "Focus on weak areas first 🚀",
-      "Quick revision > Long sessions 🔥",
-      "Smart study > Hard study 🧠",
-      "Reward yourself after milestones 🏆",
-    ];
-    const subjects = Object.keys(progress);
-    const weakest = subjects.reduce(
-      (a, b) => (progress[a] < progress[b] ? a : b),
-      subjects[0]
-    );
-    setFocusSubject(weakest);
-    setDailyTip(
-      `Today's Focus: ${weakest}. ${encouragements[Math.floor(Math.random() * encouragements.length)]}`
-    );
-  }, []);
+  loadUserData();
+}, []);
 
-  const startSession = () => {
-    setSessionStarted(true);
-    logActivity("Started today's session 🚀");
-  };
+async function loadUserData() {
+  try {
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
 
-  const updateProgress = (subject, change) => {
-    setProgress((prev) => {
-      const newVal = Math.min(100, Math.max(0, prev[subject] + change));
-      logActivity(`${subject} progress ${change > 0 ? "increased" : "decreased"} by ${Math.abs(change)}%`);
-      if (newVal === 100) grantReward(subject);
-      return { ...prev, [subject]: newVal };
+    if (!authUser) return;
+
+    /* PROFILE */
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", authUser.id)
+      .single();
+
+    /* ASSESSMENTS */
+    const { data: assessments } = await supabase
+      .from("assessments")
+      .select("*")
+      .eq("user_id", authUser.id)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    /* STUDY PLAN */
+    const { data: plans } = await supabase
+      .from("Study_plans")
+      .select("*")
+      .eq("user_id", authUser.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    /* DAILY ACTIVITY */
+    const { data: activity } = await supabase
+      .from("daily_activity")
+      .select("*")
+      .eq("user_id", authUser.id)
+      .order("date", { ascending: false })
+      .limit(1);
+
+    /* =========================
+       SUBJECT ANALYSIS
+    ========================= */
+    const subjectMap = {};
+
+    assessments?.forEach((item) => {
+      const subject = item.type || "General";
+
+      if (!subjectMap[subject]) {
+        subjectMap[subject] = [];
+      }
+
+      subjectMap[subject].push(Number(item.score || 0));
     });
-  };
 
-  const grantReward = (subject) => {
-    const reward = `🏆 Mastered ${subject}!`;
-    if (!rewards.includes(reward)) {
-      setRewards([...rewards, reward]);
-      logActivity(reward);
+    const subjects = Object.keys(subjectMap).map((key) => {
+      const arr = subjectMap[key];
+      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+
+      return {
+        name: key,
+        score: Math.round(avg),
+      };
+    });
+
+    const sortedWeak = [...subjects].sort((a, b) => a.score - b.score);
+
+    const weakSubject = sortedWeak[0]?.name || "General Revision";
+
+    const overall =
+      subjects.length > 0
+        ? Math.round(
+            subjects.reduce((sum, s) => sum + s.score, 0) /
+              subjects.length
+          )
+        : profile?.strictness_score || 65;
+
+    /* =========================
+       TODAY TASKS
+    ========================= */
+    let tasks = [];
+
+    if (plans?.[0]?.tasks && Array.isArray(plans[0].tasks)) {
+      tasks = plans[0].tasks.slice(0, 5);
+    } else {
+      tasks = [
+        {
+          subject: weakSubject,
+          task: "Practice key concepts",
+        },
+        {
+          subject: "Revision",
+          task: "Review previous lessons",
+        },
+      ];
     }
-  };
 
-  const logActivity = (msg) => {
-    setActivityLog((prev) => [msg, ...prev]);
-  };
+    /* =========================
+       FINAL USER OBJECT
+    ========================= */
+    const finalUser = {
+      id: authUser.id,
+      name:
+        profile?.name ||
+        authUser.user_metadata?.name ||
+        authUser.email?.split("@")[0] ||
+        "User",
 
-  const suggestNextStep = () => {
-    const subjects = Object.keys(progress);
-    const nextFocus = subjects.reduce(
-      (a, b) => (progress[a] < progress[b] ? a : b),
-      subjects[0]
+      email: profile?.email || authUser.email || "",
+      className: profile?.standard || "",
+
+      weak: weakSubject,
+      studyTime: activity?.[0]?.used_app ? "Active Today" : "2 Hours",
+
+      overallProgress: overall,
+
+      subjects:
+        subjects.length > 0
+          ? subjects
+          : [{ name: "General", score: overall }],
+    };
+
+    setUser(finalUser);
+    setTodayTasks(tasks);
+
+    /* =========================
+       BRAINCORE LOG (SAFE)
+    ========================= */
+    await BrainCore.log(authUser.id, "study_companion", {
+      mood: "Normal",
+      energy: "Medium",
+      weakSubject,
+      overallProgress: overall,
+    });
+  } catch (err) {
+    console.error("loadUserData error:", err);
+  } finally {
+    setLoadingPage(false);
+  }
+}
+  
+
+  /* ===================================================
+     PROGRESS ANIMATION
+  =================================================== */
+  useEffect(() => {
+    let current = 0;
+
+    const timer = setInterval(() => {
+      if (current <= user.overallProgress) {
+        setProgress(current);
+        current++;
+      } else {
+        clearInterval(timer);
+      }
+    }, 15);
+
+    return () => clearInterval(timer);
+  }, [user.overallProgress]);
+
+  /* ===================================================
+     AI GENERATE
+  =================================================== */
+  async function generateCompanion() {
+    setLoadingAI(true);
+    setAiReply("");
+
+    const prompt = `
+You are Study Companion AI of Empirox.
+
+Student Name: ${user.name}
+Class: ${user.className}
+Mood: ${mood}
+Energy: ${energy}
+Weak Subject: ${user.weak}
+Study Pattern: ${user.studyTime}
+Overall Progress: ${user.overallProgress}%
+
+Subjects:
+${user.subjects
+  .map((s) => `${s.name}: ${s.score}%`)
+  .join("\n")}
+
+Today's Tasks:
+${todayTasks
+  .map(
+    (t) =>
+      `${t.subject}: ${t.task}`
+  )
+  .join("\n")}
+
+Give:
+1. Current Study Status
+2. Best Plan Today
+3. Priority Subject
+4. Improvement Tip
+5. Motivation Line
+6. Win Goal Today
+
+Keep smart, premium, short.
+`;
+
+    try {
+      const reply = await api.sendAIMessage({
+        feature: "study_companion_ai",
+        message: prompt,
+        context: user,
+      });
+
+      setAiReply(reply);
+    } catch {
+      setAiReply(
+        "⚠️ AI unavailable right now. Try again."
+      );
+    }
+
+    setLoadingAI(false);
+  }
+
+  async function copyReport() {
+    if (!aiReply) return;
+
+    await navigator.clipboard.writeText(
+      aiReply
     );
-    return `Next, focus on ${nextFocus} for maximum improvement.`;
-  };
+
+    alert("Copied!");
+  }
+
+  if (loadingPage) {
+    return (
+      <div style={styles.loading}>
+        🚀 Loading Study Companion...
+      </div>
+    );
+  }
 
   return (
-    <div style={styles.wrapper}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>🌟 AI Study Companion</h1>
+    <div style={styles.page}>
+      {/* HEADER */}
+      <div style={styles.header}>
+        <div>
+          <h1 style={styles.title}>
+            📘 Study Companion AI
+          </h1>
 
-        {/* Daily Tip */}
-        <div style={styles.dailyTip}>{dailyTip}</div>
+          <p style={styles.sub}>
+            Personalized guidance for{" "}
+            {user.name}
+          </p>
+        </div>
 
-        {/* Subject Progress Bars */}
-        <h3 style={styles.subTitle}>📊 Subject Progress</h3>
-        {Object.keys(progress).map((subj) => (
-          <div key={subj} style={styles.progressRow}>
-            <span style={{ width: 90 }}>{subj}</span>
-            <div style={styles.progressBar}>
-              <div
-                style={{
-                  ...styles.progressFill,
-                  width: `${progress[subj]}%`,
-                  background: subj === focusSubject ? "#22d3ee" : "#3b82f6",
-                }}
-              />
-            </div>
-            <span style={{ width: 40, textAlign: "right" }}>{progress[subj]}%</span>
-            <button style={styles.progressBtn} onClick={() => updateProgress(subj, 5)}>+5</button>
-            <button style={styles.progressBtn} onClick={() => updateProgress(subj, -5)}>-5</button>
-          </div>
-        ))}
-
-        {/* Start Session */}
-        <button onClick={startSession} style={styles.mainBtn}>
-          {sessionStarted ? "Session In Progress 🚀" : "Start Today's Session"}
+        <button
+          style={styles.mainBtn}
+          onClick={generateCompanion}
+        >
+          {loadingAI
+            ? "Analyzing..."
+            : "Generate Guidance"}
         </button>
+      </div>
 
-        {/* AI Companion Suggestion */}
-        {sessionStarted && (
-          <div style={styles.aiBox}>
-            <h4>💡 AI Companion Suggestion</h4>
-            <p>{suggestNextStep()}</p>
-            <p>Use Pomodoro: 25min study + 5min break. Stay consistent!</p>
-            <p>Celebrate small wins to stay motivated 🎉</p>
-          </div>
-        )}
+      {/* TOP GRID */}
+      <div style={styles.grid}>
+        {/* PROGRESS */}
+        <div style={styles.cardCenter}>
+          <svg width="190" height="190">
+            <circle
+              cx="95"
+              cy="95"
+              r="72"
+              stroke="#2a2a2a"
+              strokeWidth="12"
+              fill="none"
+            />
 
-        {/* Rewards & Achievements */}
-        {rewards.length > 0 && (
-          <div style={styles.rewardsBox}>
-            <h4>🏆 Achievements</h4>
-            {rewards.map((r, idx) => (
-              <p key={idx}>{r}</p>
-            ))}
-          </div>
-        )}
+            <circle
+              cx="95"
+              cy="95"
+              r="72"
+              stroke="#facc15"
+              strokeWidth="12"
+              fill="none"
+              strokeDasharray={452}
+              strokeDashoffset={
+                452 -
+                (452 * progress) /
+                  100
+              }
+              strokeLinecap="round"
+            />
+          </svg>
 
-        {/* Activity Log */}
-        {activityLog.length > 0 && (
-          <div style={styles.logBox}>
-            <h4>📝 Activity Log</h4>
-            {activityLog.map((a, idx) => (
-              <p key={idx}>{a}</p>
-            ))}
+          <div style={styles.progressText}>
+            <h2>{progress}%</h2>
+            <p>Growth</p>
           </div>
+        </div>
+
+        {/* PROFILE */}
+        <div style={styles.card}>
+          <h3>👤 Student Profile</h3>
+          <p>Name: {user.name}</p>
+          <p>
+            Class: {user.className}
+          </p>
+          <p>
+            Study Status:{" "}
+            {user.studyTime}
+          </p>
+          <p>
+            Weak Subject: {user.weak}
+          </p>
+        </div>
+
+        {/* STATUS */}
+        <div style={styles.card}>
+          <h3>⚙️ Today Status</h3>
+
+          <label>Mood</label>
+          <select
+            style={styles.input}
+            value={mood}
+            onChange={(e) =>
+              setMood(
+                e.target.value
+              )
+            }
+          >
+            <option>Normal</option>
+            <option>Motivated</option>
+            <option>Stressed</option>
+            <option>Tired</option>
+          </select>
+
+          <label>Energy</label>
+          <select
+            style={styles.input}
+            value={energy}
+            onChange={(e) =>
+              setEnergy(
+                e.target.value
+              )
+            }
+          >
+            <option>Low</option>
+            <option>Medium</option>
+            <option>High</option>
+          </select>
+        </div>
+      </div>
+
+      {/* SUBJECTS */}
+      <div style={styles.subjectWrap}>
+        {user.subjects.map(
+          (sub, i) => (
+            <motion.div
+              key={i}
+              whileHover={{
+                scale: 1.04,
+              }}
+              style={
+                styles.subjectCard
+              }
+            >
+              <h4>{sub.name}</h4>
+              <p>{sub.score}%</p>
+            </motion.div>
+          )
         )}
       </div>
+
+      {/* TASKS */}
+      <div style={styles.taskBox}>
+        <h3>📅 Today Tasks</h3>
+
+        {todayTasks.map(
+          (task, i) => (
+            <p key={i}>
+              • {task.subject}:{" "}
+              {task.task}
+            </p>
+          )
+        )}
+      </div>
+
+      {/* AI REPORT */}
+      {aiReply && (
+        <div style={styles.report}>
+          <div style={styles.reportTop}>
+            <h3>
+              🧠 AI Guidance
+            </h3>
+
+            <button
+              style={
+                styles.copyBtn
+              }
+              onClick={
+                copyReport
+              }
+            >
+              Copy
+            </button>
+          </div>
+
+          <pre style={styles.pre}>
+            {aiReply}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
 
+/* ===================================================
+   STYLES
+=================================================== */
+
 const styles = {
-  wrapper: {
+  page: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #0f172a, #1e293b)",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "flex-start",
-    padding: 30,
-  },
-  card: {
-    width: "100%",
-    maxWidth: 750,
-    background: "#111827",
-    borderRadius: 20,
+    background:
+      "linear-gradient(135deg,#050505,#111827,#1f2937)",
+    color: "white",
     padding: 24,
-    boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-    color: "#e0e0f0",
-    fontFamily: "'Poppins', sans-serif",
+    fontFamily: "Inter",
   },
-  title: {
-    textAlign: "center",
-    fontSize: 28,
-    fontWeight: 700,
-    marginBottom: 20,
-    color: "#22d3ee",
-    textShadow: "0 0 8px #22d3ee",
-  },
-  dailyTip: {
-    fontSize: 16,
-    marginBottom: 20,
-    color: "#a5f3fc",
-  },
-  subTitle: {
-    fontSize: 18,
-    fontWeight: 500,
-    marginBottom: 12,
-    color: "#f0f9ff",
-  },
-  progressRow: {
+
+  loading: {
+    minHeight: "100vh",
     display: "flex",
+    justifyContent:
+      "center",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 12,
+    background:
+      "linear-gradient(135deg,#050505,#111827,#1f2937)",
+    color: "white",
+    fontSize: 22,
   },
-  progressBar: {
-    flex: 1,
-    height: 16,
-    background: "#374151",
-    borderRadius: 8,
-    overflow: "hidden",
+
+  header: {
+    display: "flex",
+    justifyContent:
+      "space-between",
+    gap: 20,
+    flexWrap: "wrap",
+    marginBottom: 24,
+    alignItems: "center",
   },
-  progressFill: {
-    height: "100%",
-    borderRadius: 8,
-    transition: "width 0.4s ease",
+
+  title: {
+    fontSize: 32,
+    marginBottom: 6,
+    color: "#facc15",
   },
-  progressBtn: {
-    padding: "4px 8px",
-    borderRadius: 8,
-    background: "#22d3ee",
-    border: "none",
-    color: "#0f172a",
-    fontWeight: 600,
-    cursor: "pointer",
+
+  sub: {
+    color: "#cbd5e1",
   },
+
   mainBtn: {
-    marginTop: 20,
+    padding: "14px 20px",
+    borderRadius: 14,
+    border: "none",
+    fontWeight: "bold",
+    cursor: "pointer",
+    background:
+      "linear-gradient(135deg,#facc15,#eab308)",
+    color: "#111",
+  },
+
+  grid: {
+    display: "grid",
+    gridTemplateColumns:
+      "repeat(auto-fit,minmax(260px,1fr))",
+    gap: 18,
+  },
+
+  card: {
+    background:
+      "rgba(255,255,255,0.05)",
+    padding: 18,
+    borderRadius: 18,
+    border:
+      "1px solid rgba(255,255,255,0.08)",
+  },
+
+  cardCenter: {
+    background:
+      "rgba(255,255,255,0.05)",
+    padding: 18,
+    borderRadius: 18,
+    border:
+      "1px solid rgba(255,255,255,0.08)",
+    display: "flex",
+    justifyContent:
+      "center",
+    alignItems: "center",
+    position: "relative",
+    minHeight: 240,
+  },
+
+  progressText: {
+    position: "absolute",
+    textAlign: "center",
+  },
+
+  input: {
     width: "100%",
+    padding: 10,
+    marginTop: 6,
+    marginBottom: 12,
+    borderRadius: 10,
+    border: "none",
+    background:
+      "#0f172a",
+    color: "white",
+  },
+
+  subjectWrap: {
+    marginTop: 22,
+    display: "grid",
+    gridTemplateColumns:
+      "repeat(auto-fit,minmax(180px,1fr))",
+    gap: 14,
+  },
+
+  subjectCard: {
+    background:
+      "rgba(250,204,21,0.08)",
+    border:
+      "1px solid rgba(250,204,21,0.25)",
     padding: 16,
     borderRadius: 16,
-    background: "#22d3ee",
-    color: "#0f172a",
-    fontWeight: 700,
+    textAlign: "center",
+  },
+
+  taskBox: {
+    marginTop: 24,
+    padding: 20,
+    borderRadius: 18,
+    background:
+      "rgba(255,255,255,0.05)",
+  },
+
+  report: {
+    marginTop: 24,
+    padding: 20,
+    borderRadius: 18,
+    background:
+      "rgba(250,204,21,0.08)",
+    border:
+      "1px solid rgba(250,204,21,0.25)",
+  },
+
+  reportTop: {
+    display: "flex",
+    justifyContent:
+      "space-between",
+    marginBottom: 14,
+    alignItems: "center",
+  },
+
+  copyBtn: {
+    padding: "8px 14px",
+    borderRadius: 10,
     border: "none",
     cursor: "pointer",
-    fontSize: 16,
+    background:
+      "#facc15",
+    color: "#111",
+    fontWeight: "bold",
   },
-  aiBox: {
-    marginTop: 24,
-    padding: 16,
-    borderRadius: 16,
-    background: "#1e293b",
-    border: "1px solid #22d3ee",
-    boxShadow: "0 8px 20px rgba(0,0,0,0.3)",
-  },
-  rewardsBox: {
-    marginTop: 24,
-    padding: 16,
-    borderRadius: 16,
-    background: "#111827",
-    border: "1px solid #22d3ee",
-  },
-  logBox: {
-    marginTop: 24,
-    padding: 16,
-    borderRadius: 16,
-    background: "#111827",
-    border: "1px solid #3b82f6",
-    maxHeight: 200,
-    overflowY: "auto",
+
+  pre: {
+    whiteSpace: "pre-wrap",
+    lineHeight: 1.7,
+    color: "#f8fafc",
   },
 };

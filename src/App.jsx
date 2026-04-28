@@ -23,48 +23,16 @@ import TestReview from "./tiers/empicraft/features/TestReview";
 import SummaryMode from "./tiers/empicraft/features/SummaryMode";
 import DoubtSolver from "./tiers/empicraft/features/DoubtSolver";
 import StudyCompanion from "./tiers/empicraft/features/StudyCompanion";
+import SkillHub from "./tiers/empicraft/features/SkillHub";
+import ProjectMaker from "./tiers/empicraft/features/ProjectMaker";
+import CareerDetector from "./tiers/empicraft/features/CareerDetector";
 
-/* ================= EMPILAB ================= */
-import EmpiLabFeatureLayout from "./tiers/empilab/layouts/EmpiLabFeatureLayout";
-import EmpilabDashboard from "./tiers/empilab/EmpilabDashboard";
-import SmartMentor from "./tiers/empilab/features/SmartMentor";
-import SkillHub from "./tiers/empilab/features/SkillHub";
-import TestArena from "./tiers/empilab/features/TestArena";
-import PracticeLabs from "./tiers/empilab/features/PracticeLabs";
-import NotesHub from "./tiers/empilab/features/NotesHub";
-import CareerDetector from "./tiers/empilab/features/CareerDetector";
-import ProjectMaker from "./tiers/empilab/features/ProjectMaker";
-import PerformanceCoach from "./tiers/empilab/features/PerformanceCoach"
-import Challenger from "./tiers/empilab/features/Challenger"
-
-/* ================= REMINDER ENGINE ================= */
-import EmpiReminderEngine from "./tiers/empilab/features/AIReminder";
 
 export default function App() {
   const { user, loadingUser } = useContext(AuthContext);
 
   /* ========== EMPI REMINDER ENGINE ========== */
-  useEffect(() => {
-    if (!user?.id) return;
-
-    if ("Notification" in window) {
-      Notification.requestPermission();
-    }
-
-    const engine = new EmpiReminderEngine(user.id);
-    engine.startEngine();
-
-    console.log("✅ EmpiReminderEngine started:", user.id);
-  }, [user]);
-
-  if (loadingUser) {
-    return (
-      <div style={{ padding: 20, textAlign: "center" }}>
-        Checking user session...
-      </div>
-    );
-  }
-
+ 
   return (
     <Routes>
       {/* ================= PUBLIC ================= */}
@@ -108,36 +76,12 @@ export default function App() {
             <Route path="AI-Summary-Mode" element={<SummaryMode />} />
             <Route path="/empicraft/doubt-solver" element={<DoubtSolver />} />
             <Route path="/empicraft/study-companion" element={<StudyCompanion />} />
+            <Route path="/empicraft/career-detector" element={<CareerDetector />} />
+            <Route path="/empicraft/project-maker" element={<ProjectMaker />} />
+            <Route path="/empicraft/Skill-Hub" element={<SkillHub />} />
           </Route>
 
-          {/* ===== EMPILAB ===== */}
-          <Route
-            path="/empilab/dashboard"
-            element={
-              
-                <EmpilabDashboard />
-              
-            }
-          />
-          {/* ===== EMPILAB FEATURES (WITH SIDEBAR) ===== */}
-<Route
-  path="/empilab"
-  element={
-    
-      <EmpiLabFeatureLayout />
-    
-  }
->
-  <Route path="smart-mentor" element={<SmartMentor />} />
-  <Route path="Skill-Hub" element={<SkillHub />} />
-  <Route path="test-arena" element={<TestArena />} />
-  <Route path="practice-labs" element={<PracticeLabs />} />
-  <Route path="notes-generator" element={<NotesHub />} />
-  <Route path="project-maker" element={<ProjectMaker />} />
-  <Route path="career-detector" element={<CareerDetector />} />
-  <Route path="Challenge Generator" element={<Challenger />} />
-  <Route path="Performance Coach" element={<PerformanceCoach />} />
-</Route>
+         
 
           {/* ===== DEFAULT ===== */}
           <Route path="/" element={<Navigate to="/tier-selector" replace />} />

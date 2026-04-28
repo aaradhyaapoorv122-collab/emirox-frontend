@@ -1,269 +1,419 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import api from "../../../utils/api.js";
-import { aiRequest } from "@/utils/aiRequest";
-import { supabase } from "@/lib/supabaseClient";
-
+import { BrainCore } from "@/utils/memoryEngine";
 
 export default function TestReviewSystem() {
-  const MAX_FILES = 6;
+  const [subject, setSubject] = useState("Mathematics");
+  const [examType, setExamType] = useState("Written");
+  const [totalMarks, setTotalMarks] = useState("80");
+  const [negativeMarking, setNegativeMarking] = useState("No");
 
-  const [files, setFiles] = useState([]);
+  const [pattern, setPattern] = useState("");
+  const [questionPaper, setQuestionPaper] = useState("");
   const [answers, setAnswers] = useState("");
+
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState("");
+  const [report, setReport] = useState("");
 
-  const fileRef = useRef(null);
-
-  /* ================= FILE UPLOAD ================= */
-  function handleFileUpload(e) {
-    const selected = Array.from(e.target.files);
-
-    if (files.length + selected.length > MAX_FILES) {
-      alert("Max 6 files allowed");
-      return;
-    }
-
-    setFiles((prev) => [...prev, ...selected]);
+  /* ================= RUN AI ================= */
+  const evaluateTest = async () => {
+  if (!answers.trim()) {
+    alert("Please enter your answers.");
+    return;
   }
 
+  setLoading(true);
+  setReport("");
 
-  const handleAskAI = async (message) => {
+  const user = JSON.parse(localStorage.getItem("user")) || { id: "guest" };
 
-    const result = await aiRequest(message, async (msg) => {
-      return await fetch("http://localhost:5000/ai/core", {
-        method: "POST",
-        headers: {
-  "Content-Type": "application/json"
-},
-        body: JSON.stringify({ message: msg }),
-      }).then(r => r.json());
-    });
+  try {
+    const reply = await api.sendAIMessage({
+      feature: "test_review_ai",
+      standard: "8",
+      context: `Subject: ${subject}`,
+      message: `
+You are evaluating a student test.
 
-    if (result.blocked) {
-      alert("🔒 Daily AI limit reached. Upgrade to EmpiLab ⚡");
-      return;
-    }
+SUBJECT: ${subject}
+EXAM TYPE: ${examType}
+TOTAL MARKS: ${totalMarks}
+NEGATIVE MARKING: ${negativeMarking}
 
-    console.log(result.data);
-  };
+EXAM PATTERN:
+${pattern}
 
-  
-
-  /* ================= AI EVALUATION ================= */
-  const evaluateTest = async () => {
-    if (files.length === 0) {
-      alert("Please upload question paper first");
-      return;
-    }
-
-    if (!answers.trim()) {
-      alert("Please enter your answers");
-      return;
-    }
-
-    setLoading(true);
-    setResult("");
-
-    try {
-      const reply = await api.sendAI({
-        feature: "test_review_ai",
-        message: `
 QUESTION PAPER:
-${files.map((f) => f.name).join("\n")}
+${questionPaper}
 
 STUDENT ANSWERS:
 ${answers}
 
-INSTRUCTION:
-Evaluate strictly and generate full analytics.
-        `,
-        context: {
-          fileCount: files.length,
-          negativeMarking: true,
-        },
-      });
+Generate:
 
-      setResult(reply);
-    } catch (err) {
-      setResult("⚠️ AI Error. Try again.");
-    }
+🎯 Score Estimate
+📈 Accuracy %
+✅ Strong Areas
+⚠️ Weak Areas
+❌ Mistakes
+📚 Improvement Plan
+🚀 Readiness Level
+💬 Motivation Note
+      `,
+    });
 
-    setLoading(false);
+    setReport(reply);
+
+    // 🧠 Extract simple AI metrics (basic version)
+    const estimatedScoreMatch = reply.match(/Score Estimate.*?(\d+)/i);
+    const accuracyMatch = reply.match(/Accuracy.*?(\d+)%/i);
+
+    const score = estimatedScoreMatch ? estimatedScoreMatch[1] : "unknown";
+    const accuracy = accuracyMatch ? accuracyMatch[1] : "unknown";
+
+    // 🧠 FIXED BrainCore logging
+    await BrainCore.log(user.id, "test_review", {
+      subject,
+      examType,
+      totalMarks,
+      score,
+      accuracy,
+      answerLength: answers.length,
+      timestamp: new Date().toISOString(),
+    });
+
+  } catch (err) {
+    console.log(err);
+    setReport("⚠️ AI failed to generate report. Please try again.");
+  }
+
+  setLoading(false);
+};
+
+  /* ================= SAVE ================= */
+  const saveReport = () => {
+    if (!report) return alert("No report to save.");
+    localStorage.setItem("empirox_test_report", report);
+    alert("✅ Report saved successfully");
+  };
+
+  /* ================= IMPROVE PLAN ================= */
+  const improvePlan = () => {
+    alert("🚀 Improvement planner can be connected next.");
   };
 
   return (
-    <div className="page">
-      <style>{`
-        .page {
-          min-height: 100vh;
-          padding: 40px;
-          background: linear-gradient(160deg, #070b1a, #020617);
-          color: #e5edff;
-          font-family: Inter, system-ui;
-        }
+    <div style={styles.page}>
+      {/* HEADER */}
+      <div style={styles.header}>
+        <h1 style={styles.title}>📊 Test Review AI</h1>
+        <p style={styles.subTitle}>
+          Predict Score • Remove Fear • Improve Faster
+        </p>
+      </div>
 
-        .title {
-          font-size: 34px;
-          font-weight: 800;
-          margin-bottom: 25px;
-        }
-
-        .grid {
-          display: grid;
-          grid-template-columns: 1fr 1.2fr;
-          gap: 30px;
-        }
-
-        .card {
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 18px;
-          padding: 22px;
-          backdrop-filter: blur(12px);
-        }
-
-        .uploadBox {
-          border: 2px dashed #3b82f6;
-          border-radius: 14px;
-          padding: 22px;
-          text-align: center;
-          cursor: pointer;
-          margin-bottom: 18px;
-        }
-
-        textarea {
-          width: 100%;
-          min-height: 140px;
-          padding: 14px;
-          border-radius: 12px;
-          border: 1px solid #334155;
-          background: #020617;
-          color: #e5edff;
-          outline: none;
-          resize: vertical;
-        }
-
-        textarea:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
-        }
-
-        .btn {
-          width: 100%;
-          margin-top: 14px;
-          padding: 14px;
-          border-radius: 14px;
-          border: none;
-          font-weight: 700;
-          cursor: pointer;
-          background: linear-gradient(135deg, #3b82f6, #22c55e);
-          color: #020617;
-        }
-
-        .btn:disabled {
-          opacity: 0.6;
-        }
-
-        .fileList {
-          font-size: 13px;
-          opacity: 0.8;
-          margin-top: 8px;
-        }
-
-        .resultBox {
-          white-space: pre-wrap;
-          font-size: 14px;
-          line-height: 1.6;
-          background: rgba(255,255,255,0.03);
-          padding: 16px;
-          border-radius: 14px;
-          border-left: 4px solid #22c55e;
-        }
-
-        .loading {
-          color: #60a5fa;
-          animation: blink 1s infinite;
-        }
-
-        @keyframes blink {
-          50% { opacity: 0.4; }
-        }
-
-        @media (max-width: 900px) {
-          .grid {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
-
-      {/* TITLE */}
-      <div className="title">📊 Test Review AI System</div>
-
-      <div className="grid">
-
+      <div style={styles.grid}>
         {/* LEFT */}
-        <div className="card">
-          <h3>Upload Question Paper</h3>
+        <div style={styles.card}>
+          <h3 style={styles.heading}>📝 Test Setup</h3>
 
-          <div
-            className="uploadBox"
-            onClick={() => fileRef.current.click()}
+          <label style={styles.label}>Subject</label>
+          <select
+            style={styles.input}
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
           >
-            📁 Click to Upload Files
-            <div className="fileList">
-              {files.length} / {MAX_FILES} files uploaded
-            </div>
-          </div>
+            <option>Mathematics</option>
+            <option>Science</option>
+            <option>English</option>
+            <option>Social Science</option>
+            <option>Competitive Exam</option>
+          </select>
 
+          <label style={styles.label}>Exam Type</label>
+          <select
+            style={styles.input}
+            value={examType}
+            onChange={(e) => setExamType(e.target.value)}
+          >
+            <option>Written</option>
+            <option>MCQ</option>
+            <option>Mixed</option>
+          </select>
+
+          <label style={styles.label}>Total Marks</label>
           <input
-            type="file"
-            multiple
-            hidden
-            ref={fileRef}
-            onChange={handleFileUpload}
+            style={styles.input}
+            value={totalMarks}
+            onChange={(e) => setTotalMarks(e.target.value)}
           />
 
-          <h3>Your Answers</h3>
+          <label style={styles.label}>Negative Marking</label>
+          <select
+            style={styles.input}
+            value={negativeMarking}
+            onChange={(e) => setNegativeMarking(e.target.value)}
+          >
+            <option>No</option>
+            <option>Yes</option>
+          </select>
 
+          <label style={styles.label}>Exam Pattern</label>
           <textarea
+            style={styles.textareaSmall}
+            placeholder="Example:
+Section A: 20 MCQ ×1
+Section B: 5 Questions ×3"
+            value={pattern}
+            onChange={(e) => setPattern(e.target.value)}
+          />
+
+          <label style={styles.label}>Question Paper</label>
+          <textarea
+            style={styles.textarea}
+            placeholder="Paste full paper here.
+
+If paper is long:
+Paste only important questions.
+
+Mobile users can manually type questions."
+            value={questionPaper}
+            onChange={(e) => setQuestionPaper(e.target.value)}
+          />
+
+          <label style={styles.label}>Your Answers</label>
+          <textarea
+            style={styles.textarea}
+            placeholder="Q1: B
+Q2: 54
+Q3: Photosynthesis is..."
             value={answers}
             onChange={(e) => setAnswers(e.target.value)}
-            placeholder="Q1: B  Q2: 24  Q3: A ..."
           />
 
           <button
-            className="btn"
+            style={styles.mainBtn}
             onClick={evaluateTest}
             disabled={loading}
           >
-            {loading ? "Analyzing..." : "Evaluate Test"}
+            {loading ? "🧠 Reviewing..." : "🚀 Generate Smart Report"}
           </button>
         </div>
 
         {/* RIGHT */}
-        <div className="card">
-          <h3>AI Evaluation Result</h3>
+        <div style={styles.card}>
+          <h3 style={styles.heading}>📈 Smart Report</h3>
 
           {loading && (
-            <div className="loading">
-              🧠 AI is analyzing your paper...
+            <div style={styles.loaderWrap}>
+              <div style={styles.loader}></div>
+              <p style={styles.loadingText}>
+                AI is checking your paper...
+              </p>
             </div>
           )}
 
-          {!loading && result && (
-            <div className="resultBox">
-              {result}
+          {!loading && !report && (
+            <div style={styles.emptyBox}>
+              <div style={styles.emptyEmoji}>📘</div>
+              <p>Your premium AI report will appear here</p>
             </div>
           )}
 
-          {!loading && !result && (
-            <p style={{ opacity: 0.6 }}>
-              Upload paper + answers to get AI evaluation
-            </p>
+          {!loading && report && (
+            <>
+              <div style={styles.reportBox}>
+                <pre style={styles.reportText}>{report}</pre>
+              </div>
+
+              <div style={styles.actions}>
+                <button style={styles.smallBtn} onClick={saveReport}>
+                  💾 Save Report
+                </button>
+
+                <button style={styles.smallBtn} onClick={improvePlan}>
+                  📚 Improve Plan
+                </button>
+              </div>
+            </>
           )}
         </div>
-
       </div>
     </div>
   );
 }
+
+/* ================= PREMIUM UI ================= */
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    padding: 20,
+    background: "#0A0A0A",
+    color: "#EAEAEA",
+    fontFamily: "Inter, sans-serif",
+  },
+
+  header: {
+    textAlign: "center",
+    marginBottom: 25,
+  },
+
+  title: {
+    fontSize: 36,
+    fontWeight: 800,
+    margin: 0,
+    background: "linear-gradient(135deg, #D4AF37, #8B6B00)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  },
+
+  subTitle: {
+    marginTop: 8,
+    color: "#A8A8A8",
+    fontSize: 15,
+  },
+
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 20,
+  },
+
+  card: {
+    background: "rgba(0,0,0,0.75)",
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    borderRadius: 20,
+    padding: 22,
+    backdropFilter: "blur(12px)",
+  },
+
+  heading: {
+    marginTop: 0,
+    color: "#D4AF37",
+    marginBottom: 16,
+  },
+
+  label: {
+    fontSize: 13,
+    color: "#C8C8C8",
+    marginBottom: 6,
+    display: "block",
+    marginTop: 10,
+  },
+
+  input: {
+    width: "100%",
+    padding: 12,
+    borderRadius: 12,
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    background: "rgba(0,0,0,0.9)",
+    color: "#EAEAEA",
+    outline: "none",
+  },
+
+  textareaSmall: {
+    width: "100%",
+    minHeight: 90,
+    padding: 12,
+    borderRadius: 12,
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    background: "rgba(0,0,0,0.9)",
+    color: "#EAEAEA",
+    resize: "vertical",
+  },
+
+  textarea: {
+    width: "100%",
+    minHeight: 130,
+    padding: 12,
+    borderRadius: 12,
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    background: "rgba(0,0,0,0.9)",
+    color: "#EAEAEA",
+    resize: "vertical",
+  },
+
+  mainBtn: {
+    width: "100%",
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 14,
+    border: "none",
+    fontWeight: 700,
+    cursor: "pointer",
+    background: "linear-gradient(135deg, #D4AF37, #8B6B00)",
+    color: "#000",
+    boxShadow: "0 0 12px rgba(255, 215, 0, 0.25)",
+  },
+
+  emptyBox: {
+    minHeight: 320,
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    flexDirection: "column",
+    color: "#A8A8A8",
+    gap: 10,
+  },
+
+  emptyEmoji: {
+    fontSize: 42,
+  },
+
+  loaderWrap: {
+    minHeight: 320,
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    flexDirection: "column",
+  },
+
+  loader: {
+    width: 42,
+    height: 42,
+    border: "4px solid rgba(255, 215, 0, 0.2)",
+    borderTop: "4px solid #D4AF37",
+    borderRadius: "50%",
+    animation: "spin 1s linear infinite",
+  },
+
+  loadingText: {
+    marginTop: 15,
+    color: "#D4AF37",
+  },
+
+  reportBox: {
+    background: "rgba(0,0,0,0.85)",
+    borderRadius: 16,
+    padding: 18,
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    maxHeight: "70vh",
+    overflowY: "auto",
+  },
+
+  reportText: {
+    whiteSpace: "pre-wrap",
+    margin: 0,
+    lineHeight: 1.8,
+    fontSize: 14,
+    color: "#EAEAEA",
+  },
+
+  actions: {
+    display: "flex",
+    gap: 10,
+    marginTop: 14,
+  },
+
+  smallBtn: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 12,
+    border: "1px solid rgba(255, 215, 0, 0.15)",
+    background: "rgba(0,0,0,0.8)",
+    color: "#D4AF37",
+    cursor: "pointer",
+    fontWeight: 600,
+  },
+};

@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from "react";
+import { BrainCore } from "@/utils/memoryEngine";
 
 export default function ConceptBlockBuilder() {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [subject, setSubject] = useState("");
   const [blocks, setBlocks] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const user = JSON.parse(localStorage.getItem("user")) || { id: "guest" };
 
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem("concept_blocks")) || [];
@@ -16,93 +20,141 @@ export default function ConceptBlockBuilder() {
     localStorage.setItem("concept_blocks", JSON.stringify(updated));
   };
 
-  const addBlock = () => {
-    if (!title || !content) return alert("Please fill all fields");
+  const addBlock = async () => {
+    if (!title.trim() || !content.trim()) {
+      alert("Please fill all fields");
+      return;
+    }
+
+    setLoading(true);
 
     const newBlock = {
       id: Date.now(),
       title,
       content,
-      subject,
-      createdAt: new Date().toLocaleDateString(),
+      subject: subject || "General",
+      masteryLevel: 1, // 🔥 future AI upgrade field
+      mistakes: [],
+      createdAt: new Date().toISOString(),
     };
 
-    saveBlocks([newBlock, ...blocks]);
-    setTitle("");
-    setContent("");
-    setSubject("");
+    try {
+      // 🔥 FIXED: proper async logging + safe values
+      await BrainCore.log(user.id, "concept_builder", {
+        concept: title,
+        subject: newBlock.subject,
+        masteryLevel: newBlock.masteryLevel,
+        contentLength: content.length,
+        timestamp: new Date().toISOString(),
+      });
+
+      saveBlocks([newBlock, ...blocks]);
+
+      setTitle("");
+      setContent("");
+      setSubject("");
+    } catch (err) {
+      console.error("Memory log failed:", err);
+    }
+
+    setLoading(false);
   };
 
   const deleteBlock = (id) => {
-    saveBlocks(blocks.filter((b) => b.id !== id));
+    const updated = blocks.filter((b) => b.id !== id);
+    saveBlocks(updated);
   };
 
   return (
     <>
-      {/* ✅ INLINE CSS (NO NEW FILE) */}
-      <style>{`
-        .concept-page {
-          background: radial-gradient(circle at top left, #0f3d2e, #071b14 70%);
-          min-height: 100vh;
-          padding: 40px;
-          color: #e6fff3;
-          font-family: Inter, Segoe UI, system-ui, sans-serif;
-        }
+     <style>{`
+  .concept-page {
+    background: #0A0A0A;
+    min-height: 100vh;
+    padding: 40px;
+    color: #EAEAEA;
+    font-family: Inter, Segoe UI, system-ui, sans-serif;
+  }
 
-        .concept-grid {
-          display: grid;
-          grid-template-columns: 1fr 1.2fr;
-          gap: 40px;
-        }
+  .concept-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 40px;
+  }
 
-        .panel {
-          background: linear-gradient(160deg, #123f2e, #0a261c);
-          border-radius: 18px;
-          padding: 28px;
-          box-shadow: 0 20px 50px rgba(0,0,0,0.4);
-        }
+  .panel {
+    background: rgba(0,0,0,0.75);
+    border-radius: 18px;
+    padding: 28px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+    border: 1px solid rgba(255, 215, 0, 0.15);
+    backdrop-filter: blur(12px);
+  }
 
-        input, textarea {
-          width: 100%;
-          background: #071b14;
-          border: 1px solid #1d6b4f;
-          border-radius: 12px;
-          padding: 14px;
-          margin-bottom: 16px;
-          color: #d9fff0;
-          outline: none;
-        }
+  input, textarea {
+    width: 100%;
+    background: rgba(0,0,0,0.9);
+    border: 1px solid rgba(255, 215, 0, 0.15);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 16px;
+    color: #EAEAEA;
+    outline: none;
+  }
 
-        textarea { min-height: 100px; }
+  textarea { 
+    min-height: 120px; 
+  }
 
-        button {
-          background: linear-gradient(135deg, #38d39f, #4fa3ff);
-          border: none;
-          padding: 12px 22px;
-          border-radius: 12px;
-          font-weight: 700;
-          cursor: pointer;
-        }
+  button {
+    background: linear-gradient(135deg, #D4AF37, #8B6B00);
+    border: none;
+    padding: 12px 22px;
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s ease;
+    color: #000;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.25);
+  }
 
-        .block {
-          background: linear-gradient(150deg, #102f24, #0b1f18);
-          border-radius: 14px;
-          padding: 18px;
-          margin-bottom: 16px;
-          border-left: 4px solid #38d39f;
-        }
+  button:hover {
+    transform: scale(1.02);
+  }
 
-        .delete {
-          background: none;
-          border: none;
-          color: #ff6b6b;
-          margin-top: 6px;
-          cursor: pointer;
-        }
-      `}</style>
+  .block {
+    background: rgba(0,0,0,0.85);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 16px;
+    border-left: 4px solid #D4AF37;
+    border: 1px solid rgba(255, 215, 0, 0.12);
+  }
+
+  .meta {
+    opacity: 0.7;
+    font-size: 12px;
+    color: #D4AF37;
+  }
+
+  .delete {
+    background: none;
+    border: none;
+    color: #ff6b6b;
+    margin-top: 6px;
+    cursor: pointer;
+  }
+
+  .loading {
+    opacity: 0.7;
+    margin-top: 10px;
+    font-size: 12px;
+    color: #D4AF37;
+  }
+`}</style>
 
       <div className="concept-page">
-        <h2>🧩 Concept Block Builder</h2>
+        <h2>🧠 Concept Block Builder (AI Memory Mode)</h2>
 
         <div className="concept-grid">
           {/* CREATE */}
@@ -116,7 +168,7 @@ export default function ConceptBlockBuilder() {
             />
 
             <textarea
-              placeholder="Explain the concept..."
+              placeholder="Explain the concept deeply..."
               value={content}
               onChange={(e) => setContent(e.target.value)}
             />
@@ -127,19 +179,28 @@ export default function ConceptBlockBuilder() {
               onChange={(e) => setSubject(e.target.value)}
             />
 
-            <button onClick={addBlock}>➕ Add</button>
+            <button onClick={addBlock} disabled={loading}>
+              {loading ? "Saving..." : "➕ Add Concept"}
+            </button>
+
+            {loading && <div className="loading">Storing in BrainCore memory...</div>}
           </div>
 
           {/* BLOCKS */}
           <div className="panel">
-            <h3>Your Blocks</h3>
+            <h3>Your Concept Memory</h3>
+
+            {blocks.length === 0 && <p>No concepts stored yet 🧩</p>}
 
             {blocks.map((b) => (
               <div key={b.id} className="block">
                 <h4>{b.title}</h4>
                 <p>{b.content}</p>
-                <small>{b.subject} · {b.createdAt}</small>
-                <br />
+
+                <div className="meta">
+                  📚 {b.subject} · 🕒 {new Date(b.createdAt).toLocaleString()}
+                </div>
+
                 <button className="delete" onClick={() => deleteBlock(b.id)}>
                   🗑 Delete
                 </button>

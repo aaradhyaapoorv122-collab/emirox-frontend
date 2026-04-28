@@ -3,7 +3,7 @@ import { AuthContext } from "../../../context/AuthContext";
 import api from "../../../utils/api.js";
 import { aiRequest } from "@/utils/aiRequest";
 import { supabase } from "@/lib/supabaseClient";
-
+import { BrainCore } from "@/utils/memoryEngine";
 
 const MAX_FILES = 6;
 
@@ -20,41 +20,18 @@ export default function SmartChat() {
   const messagesEndRef = useRef(null);
   const sessionStartTime = useRef(Date.now());
 
-
-  const handleAskAI = async (message) => {
-
-    const result = await aiRequest(message, async (msg) => {
-      return await fetch("http://localhost:5000/ai/core", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ message: msg }),
-      }).then(r => r.json());
-    });
-
-    if (result.blocked) {
-      alert("🔒 Daily AI limit reached. Upgrade to EmpiLab ⚡");
-      return;
-    }
-
-    console.log(result.data);
-  };
-
-
-
-  /* ===================== AUTO SCROLL ===================== */
+  /* ================= AUTO SCROLL ================= */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  /* ===================== SESSION TIMER ===================== */
+  /* ================= SESSION TIMER ================= */
   function formatSessionTime() {
     const s = Math.floor((Date.now() - sessionStartTime.current) / 1000);
     return `${Math.floor(s / 60)}m ${s % 60}s`;
   }
 
-  /* ===================== FILE SELECT ===================== */
+  /* ================= FILE HANDLER ================= */
   function handleFileSelect(e) {
     const files = Array.from(e.target.files);
     if (uploadedFiles.length + files.length > MAX_FILES) return;
@@ -67,52 +44,61 @@ export default function SmartChat() {
     ]);
   }
 
-  /* ===================== SEND MESSAGE ===================== */
+  /* ================= AI CALL ================= */
   async function handleSend() {
     if (!input.trim()) return;
 
     const question = input.trim();
 
-    // Show user message
-    setMessages((prev) => [
-      ...prev,
-      { type: "question", text: question },
-    ]);
-
+    setMessages((prev) => [...prev, { type: "question", text: question }]);
     setInput("");
     setLoading(true);
 
     try {
-      // 🔥 Build conversation history
-      const history = messages
+      const history = [...messages, { type: "question", text: question }]
         .filter((m) => m.type === "question" || m.type === "answer")
         .map((m) => ({
           role: m.type === "question" ? "user" : "assistant",
           content: m.text,
         }));
 
-      // 🔥 CALL REAL AI
       const reply = await api.sendAIMessage({
         message: question,
+        feature: "smart_chat_v3",
         standard: "8",
-        context: "",
+        context:
+          "Empirox Smart Chat v3 — use updated knowledge and reasoning",
         history,
       });
 
-      // ✅ Show AI response
+      const finalReply =
+        typeof reply === "string"
+          ? reply
+          : reply?.reply || JSON.stringify(reply);
+
       setMessages((prev) => [
         ...prev,
-        { type: "answer", text: reply },
+        { type: "answer", text: finalReply },
       ]);
 
+      /* ================= BRAINC CORE MEMORY ================= */
+      if (user?.id) {
+        await BrainCore.log(user.id, "smart_chat_v3", {
+          question,
+          answer: finalReply,
+          sessionTime: formatSessionTime(),
+          fileCount: uploadedFiles.length,
+        });
+      }
+
     } catch (err) {
-     console.log("ERROR DETAILS:", err?.message || err);
+      console.log(err);
 
       setMessages((prev) => [
         ...prev,
         {
           type: "answer",
-          text: "⚠️ Something went wrong. Try again.",
+          text: "⚠️ AI error occurred. Try again.",
         },
       ]);
     }
@@ -120,19 +106,33 @@ export default function SmartChat() {
     setLoading(false);
   }
 
-  /* ===================== UI ===================== */
+  /* ================= AI WRAPPER (optional fallback layer) ================= */
+  const handleAskAI = async (msg) => {
+    return await aiRequest(msg, async (m) => {
+      return await fetch("http://localhost:5000/ai/core", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: m }),
+      }).then((r) => r.json());
+    });
+  };
+
+  /* ================= UI ================= */
   return (
     <div style={styles.page}>
+
       {/* HEADER */}
       <div style={styles.header}>
         <div>
-          <h2 style={{ margin: 0 }}>Empi AI</h2>
-          <span style={styles.status}>🟢 Active • Real AI Mode</span>
+          <h2>🧠 Empirox Smart Chat v3</h2>
+          <span style={styles.status}>🟢 AI Active Mode</span>
         </div>
-        <div style={styles.session}>⏱ {formatSessionTime()}</div>
+        <div style={styles.session}>
+          ⏱ {formatSessionTime()}
+        </div>
       </div>
 
-      {/* CHAT AREA */}
+      {/* CHAT BOX */}
       <div style={styles.chatBox}>
         {messages.map((m, i) => (
           <div
@@ -140,7 +140,9 @@ export default function SmartChat() {
             style={{
               display: "flex",
               justifyContent:
-                m.type === "question" ? "flex-end" : "flex-start",
+                m.type === "question"
+                  ? "flex-end"
+                  : "flex-start",
             }}
           >
             <div
@@ -168,7 +170,7 @@ export default function SmartChat() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* INPUT BAR */}
+      {/* INPUT */}
       <div style={styles.inputWrapper}>
         <button
           onClick={() => fileRef.current.click()}
@@ -200,7 +202,11 @@ export default function SmartChat() {
           }}
         />
 
-        <button onClick={handleSend} disabled={loading} style={styles.sendBtn}>
+        <button
+          onClick={handleSend}
+          disabled={loading}
+          style={styles.sendBtn}
+        >
           ➤
         </button>
       </div>
@@ -210,7 +216,7 @@ export default function SmartChat() {
         📎 {uploadedFiles.length}/{MAX_FILES} files connected
       </div>
 
-      {/* DOT ANIMATION */}
+      {/* ANIMATION */}
       <style>
         {`
           @keyframes blink {
@@ -224,108 +230,136 @@ export default function SmartChat() {
   );
 }
 
-/* ===================== STYLES ===================== */
+/* ================= STYLES ================= */
 const styles = {
   page: {
     height: "100vh",
     display: "flex",
     flexDirection: "column",
-    background: "linear-gradient(135deg, #0f2027, #203a43, #2c5364)",
-    color: "white",
+    background: "#0A0A0A",
+    color: "#EAEAEA",
     fontFamily: "Segoe UI",
-    padding: "10px",
+    padding: 10,
   },
+
   header: {
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "center",
-    padding: "10px 15px",
+    padding: "14px 12px",
+    borderBottom: "1px solid rgba(255, 215, 0, 0.15)",
+    background: "rgba(0,0,0,0.6)",
+    backdropFilter: "blur(10px)",
   },
+
   status: {
-    fontSize: "12px",
+    fontSize: 12,
     opacity: 0.7,
+    color: "#D4AF37",
   },
+
   session: {
-    fontSize: "13px",
+    fontSize: 13,
     opacity: 0.8,
+    color: "#D4AF37",
   },
+
   chatBox: {
     flex: 1,
     overflowY: "auto",
-    padding: "15px",
-    borderRadius: "15px",
-    background: "rgba(255,255,255,0.08)",
+    padding: 15,
+    borderRadius: 15,
+    background: "rgba(255, 215, 0, 0.04)",
+    border: "1px solid rgba(255, 215, 0, 0.08)",
     backdropFilter: "blur(10px)",
     display: "flex",
     flexDirection: "column",
-    gap: "12px",
+    gap: 12,
   },
+
   userBubble: {
-    background: "linear-gradient(90deg, #00f260, #0575e6)",
+    background: "linear-gradient(135deg, #D4AF37, #8B6B00)",
     padding: "10px 16px",
-    borderRadius: "18px",
+    borderRadius: 18,
     maxWidth: "70%",
+    color: "#000",
+    fontWeight: 500,
   },
+
   aiBubble: {
-    background: "rgba(255,255,255,0.1)",
+    background: "rgba(255, 215, 0, 0.08)",
+    border: "1px solid rgba(255, 215, 0, 0.15)",
     padding: "10px 16px",
-    borderRadius: "18px",
+    borderRadius: 18,
     maxWidth: "70%",
+    color: "#EAEAEA",
   },
+
   systemBubble: {
-    background: "rgba(255,255,255,0.05)",
-    padding: "8px 12px",
-    borderRadius: "12px",
-    fontSize: "12px",
+    background: "rgba(255, 215, 0, 0.05)",
+    border: "1px solid rgba(255, 215, 0, 0.1)",
+    padding: 8,
+    borderRadius: 12,
+    fontSize: 12,
+    color: "#D4AF37",
   },
+
   typing: {
     display: "flex",
-    gap: "5px",
-    paddingLeft: "10px",
+    gap: 5,
   },
+
   dot: {
-    width: "6px",
-    height: "6px",
-    background: "white",
+    width: 6,
+    height: 6,
+    background: "#D4AF37",
     borderRadius: "50%",
     animation: "blink 1.4s infinite both",
   },
+
   inputWrapper: {
     display: "flex",
-    gap: "10px",
-    padding: "10px",
-    marginTop: "10px",
-    background: "rgba(0,0,0,0.3)",
-    borderRadius: "30px",
+    gap: 10,
+    padding: "12px",
+    background: "rgba(0,0,0,0.8)",
+    borderRadius: 30,
+    border: "1px solid rgba(255, 215, 0, 0.15)",
   },
+
   input: {
     flex: 1,
-    borderRadius: "20px",
-    padding: "10px 15px",
+    padding: 10,
+    borderRadius: 20,
     border: "none",
-    outline: "none",
     background: "transparent",
-    color: "white",
+    color: "#EAEAEA",
+    outline: "none",
   },
+
   attachBtn: {
-    background: "rgba(255,255,255,0.1)",
-    border: "none",
+    width: 40,
     borderRadius: "50%",
-    width: "40px",
+    border: "1px solid rgba(255, 215, 0, 0.2)",
+    background: "rgba(0,0,0,0.5)",
+    color: "#D4AF37",
     cursor: "pointer",
   },
+
   sendBtn: {
-    background: "linear-gradient(90deg, #00f260, #0575e6)",
-    border: "none",
+    width: 40,
     borderRadius: "50%",
-    width: "40px",
+    border: "none",
+    background: "linear-gradient(135deg, #D4AF37, #8B6B00)",
+    color: "#000",
+    fontWeight: "bold",
+    boxShadow: "0 0 10px rgba(255, 215, 0, 0.3)",
     cursor: "pointer",
-    color: "white",
   },
+
   footer: {
     textAlign: "center",
-    fontSize: "12px",
+    fontSize: 12,
     opacity: 0.6,
-    marginTop: "5px",
+    marginTop: 5,
+    color: "#D4AF37",
   },
 };

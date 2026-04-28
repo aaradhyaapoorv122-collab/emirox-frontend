@@ -1,333 +1,735 @@
-import React, { useEffect, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
-import { updateUserActivity } from "../../utils/updateUserActivity";
 import { generateDashboardAI } from "../../utils/dashboardAI";
 
 export default function EmpiCraftDashboard() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState("User");
-  const [standard, setStandard] = useState("");
 
-  const [activityData, setActivityData] = useState(null);
-  const [dailyData, setDailyData] = useState(null);
-  const [aiData, setAiData] = useState(null);
+  const [userName, setUserName] =
+    useState("User");
+  const [email, setEmail] =
+    useState("");
+  const [standard, setStandard] =
+    useState("");
 
-  useEffect(() => {
-    async function init() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  const [planType, setPlanType] =
+    useState("free");
+  const [trialDaysLeft, setTrialDaysLeft] =
+    useState(0);
 
-      if (!user) {
-        navigate("/login");
-        return;
-      }
+  /* REAL STREAK */
+  const [streak, setStreak] =
+    useState(0);
 
-      // 👤 PROFILE
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("name, standard")
-        .eq("id", user.id)
-        .single();
+  const [aiData, setAiData] =
+    useState(null);
 
-      setUserName(profile?.name || user.email || "User");
-      setStandard(profile?.standard || "");
+  /* =====================================
+     REAL STREAK SYSTEM
+  ===================================== */
+  const updateRealStreak =
+    async (userId) => {
+      const today =
+        new Date()
+          .toISOString()
+          .split("T")[0];
 
-      // 🔥 UPDATE ACTIVITY
-      const result = await updateUserActivity(
-        supabase,
-        user.id,
-        "dashboard"
+      const yesterdayDate =
+        new Date();
+
+      yesterdayDate.setDate(
+        yesterdayDate.getDate() - 1
       );
 
-      setActivityData(result);
+      const yesterday =
+        yesterdayDate
+          .toISOString()
+          .split("T")[0];
 
-      // 📊 GET TODAY USAGE
-      const today = new Date().toISOString().split("T")[0];
+      const { data: profile } =
+        await supabase
+          .from("profiles")
+          .select(
+            "current_streak,last_active_date"
+          )
+          .eq("id", userId)
+          .single();
 
-      const { data: daily } = await supabase
-        .from("daily_activity")
-        .select("feature_usage")
-        .eq("user_id", user.id)
-        .eq("date", today)
-        .single();
+      let currentStreak =
+        profile?.current_streak || 0;
 
-      setDailyData(daily);
+      const lastDate =
+        profile?.last_active_date;
 
-      // 🧠 GENERATE AI
-      const ai = generateDashboardAI({
-        current_streak: result?.current_streak || 0,
-        strictness_score: result?.strictness_score || 0,
-        feature_usage: daily?.feature_usage || {},
-        last_feature_used: result?.last_feature_used,
-      });
+      /* Already visited today */
+      if (lastDate === today) {
+        setStreak(currentStreak);
+        return currentStreak;
+      }
 
-      setAiData(ai);
+      /* Continued streak */
+      if (lastDate === yesterday) {
+        currentStreak += 1;
+      } else {
+        /* missed day -> reset */
+        currentStreak = 1;
+      }
 
-      setLoading(false);
+      await supabase
+        .from("profiles")
+        .update({
+          current_streak:
+            currentStreak,
+          last_active_date:
+            today,
+        })
+        .eq("id", userId);
+
+      setStreak(currentStreak);
+
+      return currentStreak;
+    };
+
+  /* =====================================
+     LOAD
+  ===================================== */
+  useEffect(() => {
+    async function init() {
+      try {
+        /* PLAN FROM LOCAL */
+        const localPlan =
+          localStorage.getItem(
+            "empicraft_plan"
+          ) || "free";
+
+        const trialStart =
+          localStorage.getItem(
+            "empicraft_trial_start"
+          );
+
+        if (
+          localPlan ===
+          "premium"
+        ) {
+          setPlanType(
+            "premium"
+          );
+        } else if (
+          localPlan ===
+            "trial" &&
+          trialStart
+        ) {
+          const start =
+            new Date(
+              trialStart
+            );
+
+          const end =
+            new Date(
+              start
+            );
+
+          end.setDate(
+            end.getDate() + 90
+          );
+
+          const diff =
+            end -
+            new Date();
+
+          const left =
+            Math.ceil(
+              diff /
+                (1000 *
+                  60 *
+                  60 *
+                  24)
+            );
+
+          if (left > 0) {
+            setPlanType(
+              "trial"
+            );
+            setTrialDaysLeft(
+              left
+            );
+          } else {
+            setPlanType(
+              "free"
+            );
+          }
+        }
+
+        /* USER */
+        const {
+          data: { user },
+        } =
+          await supabase.auth.getUser();
+
+        if (!user) {
+          navigate("/login");
+          return;
+        }
+
+        setEmail(
+          user.email || ""
+        );
+
+        const {
+          data: profile,
+        } = await supabase
+          .from("profiles")
+          .select(
+            "name,standard"
+          )
+          .eq(
+            "id",
+            user.id
+          )
+          .single();
+
+        setUserName(
+          profile?.name ||
+            user
+              ?.email?.split(
+                "@"
+              )[0] ||
+            "User"
+        );
+
+        setStandard(
+          profile?.standard ||
+            ""
+        );
+
+        /* REAL STREAK */
+        const liveStreak =
+          await updateRealStreak(
+            user.id
+          );
+
+        /* AI SYSTEM */
+        const ai =
+          generateDashboardAI(
+            {
+              current_streak:
+                liveStreak,
+              strictness_score:
+                Math.min(
+                  liveStreak *
+                    10,
+                  100
+                ),
+            }
+          );
+
+        setAiData(
+          ai
+        );
+      } catch (err) {
+        console.log(err);
+      } finally {
+        setTimeout(
+          () =>
+            setLoading(
+              false
+            ),
+          1200
+        );
+      }
     }
 
     init();
   }, [navigate]);
-  const getStrictnessData = (score) => {
-  if (score >= 80) return { label: "🔥 Very Strict", color: "red" };
-  if (score >= 60) return { label: "⚡ Strict", color: "orange" };
-  if (score >= 40) return { label: "🙂 Balanced", color: "blue" };
-  if (score >= 20) return { label: "😌 Relaxed", color: "green" };
 
-  return { label: "😴 Very Relaxed", color: "gray" };
-};
+  /* =====================================
+     FEATURES
+  ===================================== */
+  const freeFeatures = [
+    "Smart Chat",
+    "Concept Builder",
+    "Study Companion",
+    "Doubt Solver",
+  ];
+
+  const trialFeatures = [
+    "Smart Chat",
+    "Study Planner",
+    "Quiz Arena",
+    "Test Review",
+    "Concept Builder",
+    "AI Summary",
+    "Doubt Solver",
+    "Study Companion",
+    "Blog Builder",
+  ];
+
+  const premiumFeatures = [
+    ...trialFeatures,
+    "Skill Hub",
+    "Career Detector",
+    "Project Builder",
+  ];
+
+  const activeAccess =
+    useMemo(() => {
+      if (
+        planType ===
+        "premium"
+      )
+        return premiumFeatures;
+
+      if (
+        planType ===
+        "trial"
+      )
+        return trialFeatures;
+
+      return freeFeatures;
+    }, [planType]);
+
+  const isUnlocked = (
+    label
+  ) =>
+    activeAccess.includes(
+      label
+    );
+
+  const handleClick = (
+    label,
+    route
+  ) => {
+    if (
+      isUnlocked(
+        label
+      )
+    ) {
+      navigate(route);
+    } else {
+      navigate(
+        "/tier-selector"
+      );
+    }
+  };
+
   if (loading) {
-    return <div style={styles.loading}>🚀 Loading your dashboard...</div>;
+    return (
+      <div
+        style={
+          styles.loader
+        }
+      >
+        <div
+          style={
+            styles.rocket
+          }
+        >
+          🚀
+        </div>
+
+        <h1
+          style={
+            styles.loaderTitle
+          }
+        >
+          Launching Dashboard
+        </h1>
+
+        <p>
+          Syncing AI,
+          streak &
+          progress...
+        </p>
+      </div>
+    );
   }
+
+  const features = [
+    [
+      "🧠",
+      "Smart Chat",
+      "/empicraft/smart-chat",
+    ],
+    [
+      "📅",
+      "Study Planner",
+      "/empicraft/study-planner",
+    ],
+    [
+      "🎯",
+      "Quiz Arena",
+      "/empicraft/quiz-arena",
+    ],
+    [
+      "📊",
+      "Test Review",
+      "/empicraft/test-review",
+    ],
+    [
+      "🧱",
+      "Concept Builder",
+      "/empicraft/concept-block-builder",
+    ],
+    [
+      "📄",
+      "AI Summary",
+      "/empicraft/AI-Summary-Mode",
+    ],
+    [
+      "❓",
+      "Doubt Solver",
+      "/empicraft/doubt-solver",
+    ],
+    [
+      "🤖",
+      "Study Companion",
+      "/empicraft/study-companion",
+    ],
+    [
+      "✍️",
+      "Blog Builder",
+      "/empicraft/blog-builder",
+    ],
+    [
+      "🧪",
+      "Skill Hub",
+      "/empicraft/Skill-Hub",
+    ],
+    [
+      "📈",
+      "Career Detector",
+      "/empicraft/career-detector",
+    ],
+    [
+      "🚀",
+      "Project Builder",
+      "/empicraft/project-maker",
+    ],
+  ];
 
   return (
     <div style={styles.page}>
-      
-      {/* 🔝 HEADER */}
-      <div style={styles.header}>
+      {/* HEADER */}
+      <div
+        style={
+          styles.header
+        }
+      >
         <div>
-          <h2 style={styles.welcome}>Welcome, {userName} 👋</h2>
-          <p style={styles.subText}>{standard}</p>
-        </div>
-
-        <div style={styles.headerRight}>
-          <div style={styles.streak}>
-            🔥 {activityData?.current_streak || 0} days
-          </div>
-
-          <button
-            style={styles.backBtn}
-            onClick={() => navigate("/tier-selector")}
+          <h1
+            style={
+              styles.title
+            }
           >
-            ⬅ Back
-          </button>
-        </div>
-      </div>
+            Welcome,{" "}
+            {userName} 👑
+          </h1>
 
-      {/* ⚡ DISCIPLINE */}
-      <div style={styles.card}>
-        <h3>⚡ Discipline Score</h3>
-        <p style={styles.bigText}>
-          {activityData?.strictness_score || 0}
-        </p>
-        <p>{getStrictnessLabel(activityData?.strictness_score)}</p>
-
-        {/* ✅ SHOW ONLY AFTER DAY 1 */}
-        {activityData?.current_streak > 1 && (
-          <div style={{ marginTop: 10 }}>
-            <p>Discipline Progress</p>
-            <div style={styles.progressBg}>
-              <div
-                style={{
-                  ...styles.progressFill,
-                  width: `${activityData.strictness_score}%`,
-                }}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 🤖 AI FOCUS (MAIN INTELLIGENCE) */}
-      <div style={styles.focusCard}>
-        <div>
-          <h3>🤖 AI Focus Today</h3>
-          <h4>{aiData?.title}</h4>
-          <p>{aiData?.action}</p>
-          <p style={{ marginTop: 6, opacity: 0.8 }}>
-            {aiData?.insight}
+          <p
+            style={
+              styles.sub
+            }
+          >
+            {standard
+              ? `Class ${standard}`
+              : email}
           </p>
         </div>
 
         <button
-          style={styles.primaryBtn}
-          onClick={() => navigate("/empicraft/smart-chat")}
+          style={
+            styles.planBtn
+          }
+          onClick={() =>
+            navigate(
+              "/tier-selector"
+            )
+          }
         >
-          Start →
+          Plans
         </button>
       </div>
 
-      {/* 🚀 MAIN FEATURES */}
-      <h3 style={styles.sectionTitle}>🚀 Main Actions</h3>
-      <div style={styles.grid}>
-        {[
-          { label: "Smart Chat", icon: "🧠", route: "/empicraft/smart-chat" },
-          { label: "Planner", icon: "📅", route: "/empicraft/study-planner" },
-          { label: "Quiz", icon: "🎯", route: "/empicraft/quiz-arena" },
-          { label: "Test Review", icon: "📊", route: "/empicraft/test-review" },
-        ].map((f) => (
-          <div
-            key={f.label}
-            onClick={() => navigate(f.route)}
-            style={styles.featureCard}
-          >
-            <div style={styles.icon}>{f.icon}</div>
-            <p>{f.label}</p>
-          </div>
-        ))}
+      {/* STREAK */}
+      <div
+        style={
+          styles.streakCard
+        }
+      >
+        🔥 Current
+        Streak:{" "}
+        <b>
+          {streak}{" "}
+          day
+          {streak !==
+          1
+            ? "s"
+            : ""}
+        </b>
       </div>
 
-      {/* 🛠️ TOOLS */}
-      <h3 style={styles.sectionTitle}>🛠️ Tools</h3>
-      <div style={styles.grid}>
-        {[
-          { label: "Concept", icon: "🧱", route: "/empicraft/concept-block-builder" },
-          { label: "Summary", icon: "📄", route: "/empicraft/AI-Summary-Mode" },
-          { label: "Doubt Solver", icon: "❓", route: "/empicraft/doubt-solver" },
-          { label: "AI Companion", icon: "🤖", route: "/empicraft/study-companion" },
-        ].map((f) => (
-          <div
-            key={f.label}
-            onClick={() => navigate(f.route)}
-            style={styles.featureCardSecondary}
-          >
-            <div style={styles.icon}>{f.icon}</div>
-            <p>{f.label}</p>
-          </div>
-        ))}
+      {/* PLAN */}
+      <div
+        style={
+          styles.card
+        }
+      >
+        <h2>
+          {planType ===
+            "free" &&
+            "🟢 Free Plan"}
+
+          {planType ===
+            "trial" &&
+            "🚀 Trial Plan"}
+
+          {planType ===
+            "premium" &&
+            "👑 Premium Plan"}
+        </h2>
+
+        {planType ===
+          "trial" && (
+          <p>
+            {
+              trialDaysLeft
+            }{" "}
+            days left
+          </p>
+        )}
+      </div>
+
+      {/* AI */}
+      <div
+        style={
+          styles.card
+        }
+      >
+        <h2>
+          🤖 AI Focus
+        </h2>
+
+        <p>
+          {aiData
+            ?.title ||
+            "Keep learning daily."}
+        </p>
+
+        <p
+          style={
+            styles.small
+          }
+        >
+          {aiData
+            ?.action}
+        </p>
+      </div>
+
+      {/* FEATURES */}
+      <div
+        style={
+          styles.grid
+        }
+      >
+        {features.map(
+          (
+            item
+          ) => {
+            const unlocked =
+              isUnlocked(
+                item[1]
+              );
+
+            return (
+              <div
+                key={
+                  item[1]
+                }
+                onClick={() =>
+                  handleClick(
+                    item[1],
+                    item[2]
+                  )
+                }
+                style={{
+                  ...styles.feature,
+                  opacity:
+                    unlocked
+                      ? 1
+                      : 0.45,
+                }}
+              >
+                <div
+                  style={
+                    styles.icon
+                  }
+                >
+                  {
+                    item[0]
+                  }
+                </div>
+
+                <p>
+                  {
+                    item[1]
+                  }
+                </p>
+
+                {!unlocked && (
+                  <span>
+                    🔒
+                  </span>
+                )}
+              </div>
+            );
+          }
+        )}
       </div>
     </div>
   );
 }
 
-// 🔥 LABEL
-function getStrictnessLabel(score = 0) {
-  if (score >= 80) return "🔥 Highly Consistent";
-  if (score >= 50) return "⚡ Improving";
-  if (score >= 20) return "🟢 Getting Started";
-  return "⚠️ Needs Focus";
-}
+/* ===================================== */
 
-// 🎨 STYLES
+const gold =
+  "#d4af37";
+
 const styles = {
   page: {
-    minHeight: "100vh",
-    padding: "25px",
-    fontFamily: "Segoe UI, sans-serif",
-    background: "linear-gradient(135deg, #0f2027, #203a43, #2c5364)",
-    color: "white",
+    minHeight:
+      "100vh",
+    background:
+      "radial-gradient(circle at top,#181818,#000 70%)",
+    color:
+      "white",
+    padding: 25,
+    fontFamily:
+      "Inter,sans-serif",
   },
 
-  loading: {
-    padding: 50,
-    textAlign: "center",
-    color: "white",
+  loader: {
+    minHeight:
+      "100vh",
+    display:
+      "flex",
+    flexDirection:
+      "column",
+    justifyContent:
+      "center",
+    alignItems:
+      "center",
+    background:
+      "radial-gradient(circle,#181818,#000)",
+    color:
+      "white",
+  },
+
+  rocket: {
+    fontSize:
+      70,
+  },
+
+  loaderTitle: {
+    color: gold,
+    marginTop: 10,
   },
 
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: "25px",
+    display:
+      "flex",
+    justifyContent:
+      "space-between",
+    flexWrap:
+      "wrap",
+    gap: 15,
   },
 
-  headerRight: {
-    display: "flex",
-    gap: "10px",
-    alignItems: "center",
+  title: {
+    margin: 0,
+    color: gold,
   },
 
-  welcome: {
-    fontSize: "24px",
+  sub: {
+    color:
+      "#aaa",
   },
 
-  subText: {
-    opacity: 0.7,
-    fontSize: "14px",
+  planBtn: {
+    padding:
+      "10px 16px",
+    background:
+      "#111",
+    color:
+      "white",
+    border:
+      `1px solid ${gold}`,
+    borderRadius:
+      12,
+    cursor:
+      "pointer",
   },
 
-  streak: {
-    background: "rgba(255,255,255,0.1)",
-    padding: "6px 12px",
-    borderRadius: "10px",
-  },
-
-  backBtn: {
-    padding: "6px 12px",
-    borderRadius: "8px",
-    border: "none",
-    cursor: "pointer",
-    background: "rgba(255,255,255,0.15)",
-    color: "white",
+  streakCard: {
+    marginTop: 20,
+    padding: 18,
+    borderRadius:
+      18,
+    background:
+      "#111",
+    border:
+      `1px solid ${gold}44`,
+    fontSize: 20,
   },
 
   card: {
-    padding: "18px",
-    borderRadius: "14px",
-    marginBottom: "20px",
-    background: "rgba(255,255,255,0.08)",
+    marginTop: 18,
+    padding: 20,
+    borderRadius:
+      18,
+    background:
+      "#0c0c0c",
+    border:
+      `1px solid ${gold}33`,
   },
 
-  bigText: {
-    fontSize: "26px",
-    fontWeight: "bold",
-  },
-
-  progressBg: {
-    height: "8px",
-    background: "rgba(255,255,255,0.1)",
-    borderRadius: "10px",
-    overflow: "hidden",
-  },
-
-  progressFill: {
-    height: "100%",
-    background: "linear-gradient(90deg, #00f260, #0575e6)",
-  },
-
-  focusCard: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "20px",
-    borderRadius: "16px",
-    marginBottom: "25px",
-    background: "rgba(255,255,255,0.1)",
-  },
-
-  primaryBtn: {
-    background: "linear-gradient(90deg, #00f260, #0575e6)",
-    border: "none",
-    padding: "10px 18px",
-    borderRadius: "10px",
-    color: "white",
-    cursor: "pointer",
-    fontWeight: "bold",
-  },
-
-  sectionTitle: {
-    margin: "20px 0 10px",
+  small: {
+    color:
+      "#bbb",
   },
 
   grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(130px,1fr))",
-    gap: "16px",
-    marginBottom: "20px",
+    marginTop: 25,
+    display:
+      "grid",
+    gridTemplateColumns:
+      "repeat(auto-fit,minmax(170px,1fr))",
+    gap: 16,
   },
 
-  featureCard: {
-    padding: "16px",
-    borderRadius: "16px",
-    textAlign: "center",
-    cursor: "pointer",
-    background: "rgba(255,255,255,0.1)",
-  },
-
-  featureCardSecondary: {
-    padding: "16px",
-    borderRadius: "16px",
-    textAlign: "center",
-    cursor: "pointer",
-    background: "rgba(255,255,255,0.05)",
+  feature: {
+    padding: 20,
+    borderRadius:
+      18,
+    background:
+      "#111",
+    border:
+      `1px solid ${gold}22`,
+    textAlign:
+      "center",
+    cursor:
+      "pointer",
   },
 
   icon: {
-    fontSize: "26px",
-    marginBottom: "6px",
+    fontSize:
+      30,
+    marginBottom: 10,
   },
 };

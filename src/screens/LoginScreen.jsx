@@ -1,234 +1,738 @@
-import React, { useState, useEffect, useRef, useContext, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useContext,
+  useMemo,
+} from "react";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 import { AuthContext } from "../context/AuthContext";
 
-/* ---------------- AI LOGIN COACH ---------------- */
-function aiCoach(email, password) {
-  if (!email.includes("@")) return "Email missing '@' — fix it first.";
-  if (password.length < 6) return "Password too short (min 6 chars).";
-  if (password.length > 10 && /[A-Z]/.test(password) && /\d/.test(password))
-    return "🔥 Strong credentials detected!";
-  return "Tip: Use uppercase + numbers for stronger security.";
-}
-
-/* ---------------- AUDIT LOGGER ---------------- */
-async function audit(event, user) {
-  try {
-    await fetch("/api/audit-log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        event,
-        userId: user?.id,
-        time: new Date().toISOString(),
-        ua: navigator.userAgent,
-      }),
-    });
-  } catch (e) {
-    console.warn("Audit failed");
-  }
-}
-
-/* ---------------- MAIN COMPONENT ---------------- */
 export default function AuthScreen() {
   const navigate = useNavigate();
-  const { setUser, user } = useContext(AuthContext);
+  const { user, setUser } =
+    useContext(AuthContext);
 
-  const [mode, setMode] = useState("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [standard, setStandard] = useState("1");
+  const [mode, setMode] =
+    useState("login");
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  const [name, setName] =
+    useState("");
 
-  const lockRef = useRef(false);
-  const lastClick = useRef(0);
+  const [standard, setStandard] =
+    useState("1");
 
-  const STANDARDS = useMemo(
-    () => Array.from({ length: 12 }, (_, i) => `${i + 1}`).concat(["Above 12"]),
-    []
-  );
+  const [email, setEmail] =
+    useState("");
 
-  /* ---------------- SESSION AUTO REFRESH ---------------- */
-  useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        localStorage.setItem("empirox_user", JSON.stringify(session.user));
-      }
-    });
+  const [password, setPassword] =
+    useState("");
 
-    return () => data.subscription.unsubscribe();
-  }, []);
+  const [loading, setLoading] =
+    useState(false);
 
-  /* ---------------- AUTO REDIRECT ---------------- */
-  useEffect(() => {
-    if (user) navigate("/tier-selector", { replace: true });
-  }, [user]);
+  const [showPassword, setShowPassword] =
+    useState(false);
 
-  /* ---------------- SUBMIT HANDLER ---------------- */
-  async function handleSubmit() {
-    const now = Date.now();
+  const [error, setError] =
+    useState("");
 
-    // anti spam lock
-    if (lockRef.current || now - lastClick.current < 1200) return;
-    lockRef.current = true;
-    lastClick.current = now;
+  const [success, setSuccess] =
+    useState("");
 
-    setError("");
-    setLoading(true);
+  const lockRef =
+    useRef(false);
 
+  const lastClickRef =
+    useRef(0);
+
+  const STANDARDS =
+    useMemo(
+      () =>
+        Array.from(
+          { length: 12 },
+          (_, i) =>
+            `${i + 1}`
+        ).concat([
+          "Above 12",
+        ]),
+      []
+    );
+
+  /* ===================================
+     COUNTRY
+  =================================== */
+  function detectCountry() {
     try {
-      let authUser;
+      const tz =
+        Intl.DateTimeFormat().resolvedOptions()
+          .timeZone;
 
-      if (mode === "login") {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-        authUser = data.user;
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { name, standard },
-          },
-        });
-        if (error) throw error;
-        authUser = data.user;
-      }
-
-      if (!authUser) throw new Error("Auth failed");
-
-      /* PROFILE UPSERT */
-      const { data: profile, error: pErr } = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: authUser.id,
-            email: authUser.email,
-            name: name || "User",
-            standard,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "id" }
+      if (
+        tz.includes(
+          "Kolkata"
         )
-        .select()
-        .single();
+      )
+        return "India";
 
-      if (pErr) throw pErr;
+      if (
+        tz.includes(
+          "Tokyo"
+        )
+      )
+        return "Japan";
 
-      localStorage.setItem("empirox_user", JSON.stringify(authUser));
-      localStorage.setItem("empirox_profile", JSON.stringify(profile));
+      if (
+        tz.includes(
+          "Seoul"
+        )
+      )
+        return "South Korea";
 
-      await audit("AUTH_SUCCESS", authUser);
-      setUser(authUser);
-      navigate("/tier-selector");
-    } catch (e) {
-      setError(e.message);
-      await audit("AUTH_FAILED", null);
+      return "Global";
+    } catch {
+      return "Global";
     }
-
-    setLoading(false);
-    lockRef.current = false;
   }
 
-  const hint = aiCoach(email, password);
+  /* ===================================
+     PROFILE CREATOR
+  =================================== */
+  async function ensureProfile(
+    authUser
+  ) {
+    if (!authUser)
+      return;
 
-  /* ---------------- UI ---------------- */
+    const today =
+      new Date()
+        .toISOString()
+        .split("T")[0];
+
+    const fullName =
+      authUser
+        ?.user_metadata
+        ?.full_name ||
+      authUser
+        ?.user_metadata
+        ?.name ||
+      authUser
+        ?.user_metadata
+        ?.given_name ||
+      name ||
+      authUser.email?.split(
+        "@"
+      )[0] ||
+      "User";
+
+    const payload = {
+      id: authUser.id,
+      email:
+        authUser.email,
+
+      name: fullName,
+
+      standard:
+        authUser
+          ?.user_metadata
+          ?.standard ||
+        standard ||
+        "1",
+
+      country:
+        detectCountry(),
+
+      tier_plan:
+        "free",
+
+      role: "student",
+
+      current_streak: 1,
+
+      strictness_score: 10,
+
+      last_active_date:
+        today,
+
+      updated_at:
+        new Date().toISOString(),
+    };
+
+    await supabase
+      .from("profiles")
+      .upsert(
+        payload,
+        {
+          onConflict:
+            "id",
+        }
+      );
+
+    localStorage.setItem(
+      "empirox_profile",
+      JSON.stringify(
+        payload
+      )
+    );
+  }
+
+  /* ===================================
+     REAL STREAK UPDATE
+  =================================== */
+  async function updateStreak(
+    authUser
+  ) {
+    if (!authUser)
+      return;
+
+    const today =
+      new Date()
+        .toISOString()
+        .split("T")[0];
+
+    const yesterday =
+      new Date();
+
+    yesterday.setDate(
+      yesterday.getDate() -
+        1
+    );
+
+    const yDate =
+      yesterday
+        .toISOString()
+        .split("T")[0];
+
+    const {
+      data: profile,
+    } =
+      await supabase
+        .from(
+          "profiles"
+        )
+        .select(
+          "current_streak,last_active_date"
+        )
+        .eq(
+          "id",
+          authUser.id
+        )
+        .single();
+
+    if (!profile)
+      return;
+
+    let streak =
+      profile.current_streak ||
+      0;
+
+    if (
+      profile.last_active_date ===
+      today
+    ) {
+      return;
+    } else if (
+      profile.last_active_date ===
+      yDate
+    ) {
+      streak += 1;
+    } else {
+      streak = 1;
+    }
+
+    await supabase
+      .from(
+        "profiles"
+      )
+      .update({
+        current_streak:
+          streak,
+
+        last_active_date:
+          today,
+
+        strictness_score:
+          Math.min(
+            streak *
+              10,
+            100
+          ),
+
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq(
+        "id",
+        authUser.id
+      );
+  }
+
+  /* ===================================
+     AUTH WATCHER
+  =================================== */
+  useEffect(() => {
+    const {
+      data: {
+        subscription,
+      },
+    } =
+      supabase.auth.onAuthStateChange(
+        async (
+          event,
+          session
+        ) => {
+          if (
+            session?.user
+          ) {
+            const authUser =
+              session.user;
+
+            setUser(
+              authUser
+            );
+
+            localStorage.setItem(
+              "empirox_user",
+              JSON.stringify(
+                authUser
+              )
+            );
+
+            await ensureProfile(
+              authUser
+            );
+
+            await updateStreak(
+              authUser
+            );
+
+            navigate(
+              "/tier-selector",
+              {
+                replace: true,
+              }
+            );
+          }
+        }
+      );
+
+    return () =>
+      subscription.unsubscribe();
+  }, []);
+
+  /* ===================================
+     REDIRECT
+  =================================== */
+  useEffect(() => {
+    if (user) {
+      navigate(
+        "/tier-selector",
+        {
+          replace: true,
+        }
+      );
+    }
+  }, [user]);
+
+  /* ===================================
+     VALIDATE
+  =================================== */
+  function validate() {
+    if (!email)
+      return "Enter email.";
+
+    if (
+      !email.includes(
+        "@"
+      )
+    )
+      return "Valid email required.";
+
+    if (!password)
+      return "Enter password.";
+
+    if (
+      password.length <
+      6
+    )
+      return "Password min 6 characters.";
+
+    if (
+      mode ===
+        "signup" &&
+      !name
+    )
+      return "Enter full name.";
+
+    return "";
+  }
+
+  /* ===================================
+     LOGIN / SIGNUP
+  =================================== */
+  async function handleSubmit() {
+    const now =
+      Date.now();
+
+    if (
+      lockRef.current ||
+      now -
+        lastClickRef.current <
+        1200
+    )
+      return;
+
+    lockRef.current =
+      true;
+
+    lastClickRef.current =
+      now;
+
+    setLoading(
+      true
+    );
+
+    setError("");
+    setSuccess("");
+
+    try {
+      const msg =
+        validate();
+
+      if (msg)
+        throw new Error(
+          msg
+        );
+
+      /* LOGIN */
+      if (
+        mode ===
+        "login"
+      ) {
+        const {
+          data,
+          error,
+        } =
+          await supabase.auth.signInWithPassword(
+            {
+              email:
+                email.trim(),
+              password,
+            }
+          );
+
+        if (error)
+          throw error;
+
+        await ensureProfile(
+          data.user
+        );
+
+        await updateStreak(
+          data.user
+        );
+
+        setUser(
+          data.user
+        );
+
+        navigate(
+          "/tier-selector"
+        );
+      }
+
+      /* SIGNUP */
+      else {
+        const {
+          data,
+          error,
+        } =
+          await supabase.auth.signUp(
+            {
+              email:
+                email.trim(),
+              password,
+
+              options:
+                {
+                  data: {
+                    name:
+                      name.trim(),
+                    standard,
+                  },
+                },
+            }
+          );
+
+        if (error)
+          throw error;
+
+        if (
+          !data.session
+        ) {
+          setSuccess(
+            "Account created. Verify email first."
+          );
+          return;
+        }
+
+        await ensureProfile(
+          data.user
+        );
+
+        await updateStreak(
+          data.user
+        );
+
+        setUser(
+          data.user
+        );
+
+        navigate(
+          "/tier-selector"
+        );
+      }
+    } catch (err) {
+      setError(
+        err.message ||
+          "Failed."
+      );
+    } finally {
+      setLoading(
+        false
+      );
+
+      lockRef.current =
+        false;
+    }
+  }
+
+  /* ===================================
+     GOOGLE LOGIN
+  =================================== */
+const handleGoogle = async () => {
+  await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: window.location.origin + "/login",
+      skipBrowserRedirect: false
+    }
+  });
+};
+
   return (
     <div style={styles.page}>
-      <FloatingBackground />
-
       <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
+        initial={{
+          opacity: 0,
+          y: 30,
+        }}
+        animate={{
+          opacity: 1,
+          y: 0,
+        }}
+        transition={{
+          duration: 0.5,
+        }}
         style={styles.card}
       >
-        <h1 style={styles.title}>Empirox Secure Core</h1>
-        <p style={styles.sub}>AI-powered authentication system</p>
+        <h1 style={styles.title}>
+          Empirox Login
+        </h1>
 
-        {/* NAME */}
-        {mode === "signup" && (
-          <input
-            style={styles.input}
-            placeholder="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
+        <p style={styles.sub}>
+          Secure AI Access
+        </p>
+
+        {mode ===
+          "signup" && (
+          <>
+            <input
+              style={
+                styles.input
+              }
+              placeholder="Full Name"
+              value={
+                name
+              }
+              onChange={(
+                e
+              ) =>
+                setName(
+                  e.target
+                    .value
+                )
+              }
+            />
+
+            <select
+              style={
+                styles.input
+              }
+              value={
+                standard
+              }
+              onChange={(
+                e
+              ) =>
+                setStandard(
+                  e.target
+                    .value
+                )
+              }
+            >
+              {STANDARDS.map(
+                (
+                  s
+                ) => (
+                  <option
+                    key={
+                      s
+                    }
+                  >
+                    {
+                      s
+                    }
+                  </option>
+                )
+              )}
+            </select>
+          </>
         )}
 
-        {/* STANDARD */}
-        {mode === "signup" && (
-          <select
-            style={styles.input}
-            value={standard}
-            onChange={(e) => setStandard(e.target.value)}
-          >
-            {STANDARDS.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        )}
-
-        {/* EMAIL */}
         <input
-          style={styles.input}
+          style={
+            styles.input
+          }
           placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          value={
+            email
+          }
+          onChange={(
+            e
+          ) =>
+            setEmail(
+              e.target
+                .value
+            )
+          }
         />
 
-        {/* PASSWORD */}
-        <div style={{ position: "relative" }}>
+        <div
+          style={{
+            position:
+              "relative",
+          }}
+        >
           <input
-            style={styles.input}
-            type={showPassword ? "text" : "password"}
+            style={
+              styles.input
+            }
+            type={
+              showPassword
+                ? "text"
+                : "password"
+            }
             placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            value={
+              password
+            }
+            onChange={(
+              e
+            ) =>
+              setPassword(
+                e.target
+                  .value
+              )
+            }
           />
+
           <span
-            style={styles.eye}
-            onClick={() => setShowPassword((p) => !p)}
+            style={
+              styles.eye
+            }
+            onClick={() =>
+              setShowPassword(
+                (
+                  p
+                ) =>
+                  !p
+              )
+            }
           >
-            {showPassword ? "Hide" : "Show"}
+            {showPassword
+              ? "Hide"
+              : "Show"}
           </span>
         </div>
 
-        {/* AI COACH PANEL */}
-        <div style={styles.aiBox}>🧠 AI: {hint}</div>
+        {error && (
+          <div
+            style={
+              styles.error
+            }
+          >
+            {error}
+          </div>
+        )}
 
-        {/* ERROR */}
-        {error && <div style={styles.error}>{error}</div>}
+        {success && (
+          <div
+            style={
+              styles.success
+            }
+          >
+            {success}
+          </div>
+        )}
 
-        {/* LOGIN BUTTON */}
-        <button style={styles.button} onClick={handleSubmit} disabled={loading}>
-          {loading ? "Processing..." : mode === "login" ? "Login" : "Create Account"}
-        </button>
-
-        {/* GOOGLE LOGIN */}
         <button
-          style={styles.google}
-          onClick={() =>
-            supabase.auth.signInWithOAuth({ provider: "google" })
+          style={
+            styles.button
+          }
+          onClick={
+            handleSubmit
+          }
+          disabled={
+            loading
           }
         >
-          Continue with Google
+          {loading
+            ? "Please wait..."
+            : mode ===
+              "login"
+            ? "Login"
+            : "Create Account"}
         </button>
 
-        {/* SWITCH */}
+        <button
+  type="button"
+  style={styles.google}
+  onClick={handleGoogle}
+>
+  Continue with Google
+</button>
+
         <p style={styles.switch}>
-          {mode === "login" ? "New here?" : "Already have account?"}{" "}
-          <span onClick={() => setMode(mode === "login" ? "signup" : "login")}>
+          {mode ===
+          "login"
+            ? "New here?"
+            : "Already account?"}{" "}
+          <span
+            style={
+              styles.switchBtn
+            }
+            onClick={() =>
+              setMode(
+                mode ===
+                  "login"
+                  ? "signup"
+                  : "login"
+              )
+            }
+          >
             Switch
           </span>
         </p>
@@ -237,125 +741,143 @@ export default function AuthScreen() {
   );
 }
 
-/* ---------------- BACKGROUND ---------------- */
-function FloatingBackground() {
-  return (
-    <>
-      <div style={styles.bg1} />
-      <div style={styles.bg2} />
-    </>
-  );
-}
+const gold =
+  "#d4af37";
 
-/* ---------------- STYLES ---------------- */
 const styles = {
   page: {
-    height: "100vh",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    background: "#05070D",
-    overflow: "hidden",
-    fontFamily: "system-ui",
-  },
-
-  bg1: {
-    position: "absolute",
-    width: 500,
-    height: 500,
-    background: "#7C3AED",
-    filter: "blur(160px)",
-    top: "10%",
-    left: "15%",
-    opacity: 0.4,
-  },
-
-  bg2: {
-    position: "absolute",
-    width: 500,
-    height: 500,
-    background: "#06B6D4",
-    filter: "blur(180px)",
-    bottom: "10%",
-    right: "15%",
-    opacity: 0.4,
+    minHeight:
+      "100vh",
+    display:
+      "flex",
+    justifyContent:
+      "center",
+    alignItems:
+      "center",
+    padding: 20,
+    background:
+      "radial-gradient(circle at top,#181818,#000 70%)",
+    fontFamily:
+      "Inter,sans-serif",
   },
 
   card: {
-    width: 420,
-    padding: 28,
-    borderRadius: 20,
-    background: "rgba(255,255,255,0.06)",
-    backdropFilter: "blur(22px)",
-    border: "1px solid rgba(255,255,255,0.1)",
-    color: "white",
+    width: "100%",
+    maxWidth: 430,
+    padding: 30,
+    borderRadius: 24,
+    background:
+      "rgba(255,255,255,0.05)",
+    border:
+      `1px solid ${gold}44`,
+    backdropFilter:
+      "blur(18px)",
+    color:
+      "white",
   },
 
-  title: { fontSize: 24, fontWeight: "bold" },
-  sub: { fontSize: 12, opacity: 0.7, marginBottom: 15 },
+  title: {
+    fontSize: 32,
+    margin: 0,
+    color: gold,
+    fontWeight: 800,
+  },
+
+  sub: {
+    color:
+      "#bbb",
+    marginTop: 6,
+    marginBottom: 12,
+  },
 
   input: {
     width: "100%",
-    padding: 12,
+    padding: 13,
     marginTop: 10,
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.1)",
-    background: "rgba(0,0,0,0.4)",
-    color: "white",
-    outline: "none",
+    borderRadius: 12,
+    border:
+      "1px solid #333",
+    background:
+      "#111",
+    color:
+      "white",
   },
 
   eye: {
-    position: "absolute",
-    right: 12,
-    top: 14,
+    position:
+      "absolute",
+    right: 14,
+    top: 24,
     fontSize: 12,
-    cursor: "pointer",
-    opacity: 0.7,
-  },
-
-  aiBox: {
-    marginTop: 10,
-    fontSize: 12,
-    opacity: 0.8,
-    padding: 10,
-    borderRadius: 10,
-    background: "rgba(0,0,0,0.3)",
+    cursor:
+      "pointer",
+    color:
+      "#bbb",
   },
 
   button: {
     width: "100%",
-    marginTop: 15,
-    padding: 12,
-    borderRadius: 10,
+    padding: 13,
+    marginTop: 14,
     border: "none",
-    background: "linear-gradient(90deg,#7C3AED,#06B6D4)",
-    color: "white",
-    fontWeight: "bold",
-    cursor: "pointer",
+    borderRadius: 12,
+    cursor:
+      "pointer",
+    fontWeight: 800,
+    background:
+      "linear-gradient(145deg,#f6d76f,#c89717)",
+    color:
+      "#000",
   },
 
   google: {
     width: "100%",
+    padding: 13,
     marginTop: 10,
-    padding: 12,
-    borderRadius: 10,
-    background: "white",
-    color: "black",
-    fontWeight: "bold",
     border: "none",
+    borderRadius: 12,
+    cursor:
+      "pointer",
+    fontWeight: 700,
+    background:
+      "#fff",
+    color:
+      "#111",
   },
 
   switch: {
-    marginTop: 10,
-    fontSize: 12,
-    opacity: 0.7,
-    textAlign: "center",
+    marginTop: 14,
+    textAlign:
+      "center",
+    fontSize: 13,
+    color:
+      "#aaa",
+  },
+
+  switchBtn: {
+    color: gold,
+    cursor:
+      "pointer",
+    fontWeight: 700,
   },
 
   error: {
     marginTop: 10,
-    color: "#ff6b6b",
-    fontSize: 12,
+    padding: 10,
+    borderRadius: 10,
+    background:
+      "rgba(255,0,0,0.12)",
+    color:
+      "#ff9b9b",
+  },
+
+  success: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    background:
+      "rgba(0,255,120,0.12)",
+    color:
+      "#8fffbc",
   },
 };
